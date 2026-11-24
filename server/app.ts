@@ -14,10 +14,16 @@ import {
 } from './store.js';
 import {
   AnnualPlan,
+  AdjustmentIndex,
+  ContractStatus,
+  EntryStatus,
   Contract,
   ContractAdjustment,
   DatabaseState,
   Entry,
+  ADJUSTMENT_INDICES,
+  CONTRACT_STATUSES,
+  ENTRY_STATUSES,
   getDefaultPermissionsForRole,
   RegistryItem,
   RegistryType,
@@ -404,6 +410,139 @@ function propagateRegistryRename(type: RegistryType, oldName: string, newName: s
   }
 }
 
+// ---------------------------------------------------------------------------
+// Validação / sanitização de entrada (o servidor NUNCA confia no que o cliente envia)
+// ---------------------------------------------------------------------------
+const MAX_SHORT = 200;
+const MAX_LONG = 2000;
+const FORBIDDEN_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
+
+function cleanStr(v: unknown, max = MAX_SHORT, keepNewlines = false): string {
+  if (typeof v !== 'string') return '';
+  const noCtl = keepNewlines
+    ? v.replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, '')
+    : v.replace(/[\u0000-\u001F\u007F]/g, ' ');
+  return noCtl.trim().slice(0, max);
+}
+
+function cleanNum(v: unknown, min = -1e11, max = 1e11): number {
+  const n = Number(v);
+  return Number.isFinite(n) ? Math.min(max, Math.max(min, n)) : 0;
+}
+
+function cleanDate(v: unknown): string {
+  const s = cleanStr(v, 10);
+  return /^\d{4}-\d{2}-\d{2}$/.test(s) ? s : '';
+}
+
+function cleanCompetencia(v: unknown): string {
+  const s = cleanStr(v, 7);
+  return /^\d{4}-(0[1-9]|1[0-2])$/.test(s) ? s : '';
+}
+
+/** Só aceita links http/https (bloqueia javascript:, data:, etc.). */
+function cleanUrl(v: unknown): string {
+  const s = cleanStr(v, 2000);
+  if (!s) return '';
+  try {
+    const u = new URL(s);
+    return u.protocol === 'http:' || u.protocol === 'https:' ? u.toString() : '';
+  } catch {
+    return '';
+  }
+}
+
+function isRegistryType(t: unknown): t is RegistryType {
+  return t === 'categorias' || t === 'empresas' || t === 'departamentos' || t === 'fornecedores';
+}
+
+function asRecord(raw: unknown): Record<string, unknown> {
+  return raw && typeof raw === 'object' && !Array.isArray(raw) ? (raw as Record<string, unknown>) : {};
+}
+
+/** Lista branca de campos de lançamento: nada além disso chega ao banco. */
+function sanitizeEntryBody(raw: unknown): Partial<Entry> {
+  const r = asRecord(raw);
+  const out: Partial<Entry> = {};
+  const comp = cleanCompetencia(r.competencia);
+  if (comp) out.competencia = comp;
+  if (r.dataPagamento !== undefined) out.dataPagamento = cleanDate(r.dataPagamento);
+  for (const k of ['categoria', 'empresa', 'departamento', 'fornecedor'] as const) {
+    if (r[k] !== undefined) out[k] = cleanStr(r[k]);
+  }
+  if (r.descricao !== undefined) out.descricao = cleanStr(r.descricao, 300);
+  if (r.obs !== undefined) out.obs = cleanStr(r.obs, MAX_LONG, true);
+  if (r.recorrente !== undefined) out.recorrente = Boolean(r.recorrente);
+  if (r.orcado !== undefined) out.orcado = cleanNum(r.orcado);
+  if (r.realizado !== undefined) out.realizado = cleanNum(r.realizado);
+  if (ENTRY_STATUSES.includes(r.status as EntryStatus)) out.status = r.status as EntryStatus;
+  if (r.contratoId !== undefined) out.contratoId = cleanStr(r.contratoId, 100) || undefined;
+  return out;
+}
+
+/** Lista branca de campos de contrato (id, auditoria e reajustes nunca vêm do cliente). */
+function sanitizeContractBody(raw: unknown): Partial<Contract> {
+  const r = asRecord(raw);
+  const out: Partial<Contract> = {};
+  if (r.fornecedor !== undefined) out.fornecedor = cleanStr(r.fornecedor);
+  if (r.cnpj !== undefined) out.cnpj = cleanStr(r.cnpj, 30);
+  if (r.objeto !== undefined) out.objeto = cleanStr(r.objeto, 500);
+  for (const k of ['categoria', 'empresa', 'departamento', 'responsavel', 'formaPagamento'] as const) {
+    if (r[k] !== undefined) out[k] = cleanStr(r[k]);
+  }
+  if (r.inicio !== undefined) out.inicio = cleanDate(r.inicio);
+  if (r.fim !== undefined) out.fim = cleanDate(r.fim);
+  if (r.renovacaoAutomatica !== undefined) out.renovacaoAutomatica = Boolean(r.renovacaoAutomatica);
+  if (r.avisoPrevioDias !== undefined) out.avisoPrevioDias = cleanNum(r.avisoPrevioDias, 0, 3650);
+  if (r.valorMensal !== undefined) out.valorMensal = cleanNum(r.valorMensal, 0);
+  if (r.valorTotal !== undefined) out.valorTotal = cleanNum(r.valorTotal, 0);
+  if (ADJUSTMENT_INDICES.includes(r.indiceReajuste as AdjustmentIndex)) {
+    out.indiceReajuste = r.indiceReajuste as AdjustmentIndex;
+  }
+  if (r.mesDataBase !== undefined) out.mesDataBase = Math.round(cleanNum(r.mesDataBase, 1, 12)) || 1;
+  if (r.diaVencimento !== undefined) out.diaVencimento = Math.round(cleanNum(r.diaVencimento, 1, 31)) || 1;
+  if (r.linkDocumento !== undefined) out.linkDocumento = cleanUrl(r.linkDocumento);
+  if (CONTRACT_STATUSES.includes(r.status as ContractStatus)) out.status = r.status as ContractStatus;
+  if (r.obs !== undefined) out.obs = cleanStr(r.obs, MAX_LONG, true);
+  return out;
+}
+
+/** tetos: { categoria: [12 números >= 0] } — descarta qualquer outra estrutura. */
+function sanitizeTetos(raw: unknown): Record<string, number[]> | null {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
+  const entries = Object.entries(raw as Record<string, unknown>);
+  if (entries.length > 200) return null;
+  const out: Record<string, number[]> = {};
+  for (const [key, val] of entries) {
+    const name = cleanStr(key);
+    if (!name || FORBIDDEN_KEYS.has(name)) continue;
+    if (!Array.isArray(val)) return null;
+    out[name] = Array.from({ length: 12 }, (_, i) => cleanNum(val[i], 0));
+  }
+  return out;
+}
+
+/**
+ * Autorização no nível do DADO (não só da tela): cada usuário recebe somente o que sua
+ * permissão cobre. Sem isso, qualquer login lia contratos/lançamentos pela API.
+ */
+function redactStateFor(state: DatabaseState, ctx: AuthContext): DatabaseState {
+  const p = ctx.permissoes;
+  const analytic = p.painelAnalytics || p.relatorios;
+  const canEntries = p.lancamentos || analytic;
+  const canContracts = p.contratos || analytic;
+  const canPlans = p.planejamento || analytic;
+  const isDev = ctx.role === 'developer' && p.gerenciarUsuarios;
+  return {
+    ...state,
+    entries: canEntries ? state.entries : [],
+    contracts: canContracts ? state.contracts : [],
+    plans: canPlans ? state.plans : {},
+    // só o Desenvolvedor enxerga a lista completa de usuários (e-mails e permissões)
+    users: isDev ? state.users : state.users.filter((u) => u.id === ctx.userId),
+  };
+}
+
 /** Garante a conta no Firebase Auth do usuário cadastrado (e-mail já considerado verificado pelo Desenvolvedor). */
 async function syncAuthAccount(opts: { email: string; nome: string; ativo: boolean; previousEmail?: string }) {
   const auth = adminAuth();
@@ -433,50 +572,13 @@ export function createApp() {
   const app = express();
   app.disable('x-powered-by');
   app.set('trust proxy', 1);
-  app.use(express.json({ limit: '10mb' }));
+  app.use(express.json({ limit: '4mb' }));
 
   // Cabeçalhos de segurança básicos para a API
   app.use((_req, res, next) => {
     res.setHeader('X-Content-Type-Options', 'nosniff');
     res.setHeader('Cache-Control', 'no-store');
     next();
-  });
-
-  // Diagnóstico público e SEM segredos: mostra o que o servidor enxerga na configuração.
-  app.get('/api/health', async (_req: Request, res: Response) => {
-    const env = process.env;
-    const key = env.FIREBASE_PRIVATE_KEY || '';
-    const info: Record<string, unknown> = {
-      node: process.version,
-      projectId: env.FIREBASE_PROJECT_ID || null,
-      clientEmail: env.FIREBASE_CLIENT_EMAIL || null,
-      privateKey: {
-        presente: key.length > 0,
-        comecaComBegin: key.replace(/^["'\s]+/, '').startsWith('-----BEGIN PRIVATE KEY-----'),
-        terminaComEnd: key.replace(/["'\s]+$/, '').replace(/\\n$/, '').trim().endsWith('-----END PRIVATE KEY-----'),
-        temQuebrasReais: key.includes('\n'),
-        temBarraNLiteral: key.includes('\\n'),
-        comAspasNasPontas: /^["']|["']$/.test(key.trim()),
-        tamanho: key.length,
-      },
-      vars: {
-        SESSION_SECRET: Boolean(env.SESSION_SECRET && env.SESSION_SECRET.length >= 32),
-        DEVELOPER_ACCESS_CODE: Boolean(env.DEVELOPER_ACCESS_CODE),
-        BOOTSTRAP_DEVELOPER_EMAIL: env.BOOTSTRAP_DEVELOPER_EMAIL || null,
-      },
-    };
-    try {
-      await adminAuth().listUsers(1);
-      info.firebaseAuth = 'ok';
-    } catch (err) {
-      info.firebaseAuth = `ERRO ${(err as { code?: string })?.code || ''}: ${String((err as Error)?.message).slice(0, 200)}`;
-    }
-    try {
-      info.firestoreVersion = await readVersion();
-    } catch (err) {
-      info.firestore = `ERRO ${(err as { code?: string })?.code || ''}: ${String((err as Error)?.message).slice(0, 200)}`;
-    }
-    res.json(info);
   });
 
   // Tudo em /api exige login Firebase válido + usuário ativo cadastrado.
@@ -540,7 +642,15 @@ export function createApp() {
         };
 
         // 4) grava no Firestore ANTES de responder, quando o handler alterou algo
-        const originalJson = res.json.bind(res);
+        const rawJson = res.json.bind(res);
+        const ctxForResponse = (req as AuthedRequest).authCtx as AuthContext;
+        // toda resposta que carrega o estado completo é filtrada pelas permissões do usuário
+        const originalJson = (body?: unknown) => {
+          if (body && typeof body === 'object' && (body as { state?: unknown }).state === db) {
+            return rawJson({ ...(body as object), state: redactStateFor(db, ctxForResponse) });
+          }
+          return rawJson(body);
+        };
         res.json = ((body?: unknown) => {
           if (!dirty) return originalJson(body);
           persistIfDirty()
@@ -928,7 +1038,7 @@ export function createApp() {
   app.post('/api/entries', requireRole(['admin', 'editor'], 'lancamentos'), (req: Request, res: Response) => {
     const ctx = getAuthContext(req);
     const now = new Date().toISOString();
-    const body = req.body as Partial<Entry>;
+    const body = sanitizeEntryBody(req.body);
 
     if (!body.competencia || !body.categoria || !body.descricao || !body.empresa || !body.departamento) {
       res.status(400).json({
@@ -985,7 +1095,7 @@ export function createApp() {
       return;
     }
 
-    const body = req.body as Partial<Entry>;
+    const body = sanitizeEntryBody(req.body);
     const existing = db.entries[idx];
     const orcado = body.orcado !== undefined ? Math.max(0, Number(body.orcado) || 0) : existing.orcado;
     const rawRealUpdate = body.realizado !== undefined ? Number(body.realizado) : existing.realizado;
@@ -1046,6 +1156,10 @@ export function createApp() {
       res.status(400).json({ error: 'Informe a competência de origem e a de destino.' });
       return;
     }
+    if (!cleanCompetencia(sourceCompetencia) || !cleanCompetencia(targetCompetencia)) {
+      res.status(400).json({ error: 'Competência inválida. Use o formato AAAA-MM.' });
+      return;
+    }
     if (sourceCompetencia === targetCompetencia) {
       res.status(400).json({ error: 'A competência de destino deve ser diferente da origem.' });
       return;
@@ -1098,19 +1212,19 @@ export function createApp() {
   app.post('/api/entries/import', requireRole(['admin', 'editor'], 'lancamentos'), (req: Request, res: Response) => {
     const ctx = getAuthContext(req);
     const now = new Date().toISOString();
-    const { entries: incomingEntries } = req.body as {
-      entries: Array<
-        Omit<Entry, 'id' | 'criadoPor' | 'criadoEm' | 'atualizadoPor' | 'atualizadoEm'>
-      >;
-    };
+    const incomingEntries = (req.body as { entries?: unknown })?.entries;
 
     if (!Array.isArray(incomingEntries) || incomingEntries.length === 0) {
       res.status(400).json({ error: 'Nenhum lançamento válido selecionado para importação.' });
       return;
     }
+    if (incomingEntries.length > 2000) {
+      res.status(400).json({ error: 'Importe no máximo 2.000 lançamentos por vez.' });
+      return;
+    }
 
     const addIfMissing = (type: RegistryType, nome: string) => {
-      const clean = nome.trim();
+      const clean = cleanStr(nome);
       if (!clean) return;
       const list = db.registries[type];
       if (!list.some((i) => i.nome.toLowerCase() === clean.toLowerCase())) {
@@ -1127,15 +1241,21 @@ export function createApp() {
     };
 
     let importedCount = 0;
-    for (const item of incomingEntries) {
+    let skippedCount = 0;
+    for (const rawItem of incomingEntries) {
+      const item = sanitizeEntryBody(rawItem);
+      if (!item.competencia || !item.categoria || !item.descricao || !item.empresa || !item.departamento) {
+        skippedCount++;
+        continue;
+      }
+
       addIfMissing('categorias', item.categoria);
       addIfMissing('empresas', item.empresa);
       addIfMissing('departamentos', item.departamento);
       if (item.fornecedor) addIfMissing('fornecedores', item.fornecedor);
 
-      const orcado = Math.max(0, Number(item.orcado) || 0);
-      const rawRealImport = Number(item.realizado);
-      const realizado = Number.isFinite(rawRealImport) ? Math.round(rawRealImport * 100) / 100 : 0;
+      const orcado = Math.max(0, item.orcado ?? 0);
+      const realizado = Math.round((item.realizado ?? 0) * 100) / 100;
 
       db.entries.unshift({
         id: genId('ent'),
@@ -1161,16 +1281,21 @@ export function createApp() {
       importedCount++;
     }
 
+    if (importedCount === 0) {
+      res.status(400).json({ error: 'Nenhuma linha válida encontrada (confira competência, categoria, descrição, empresa e departamento).' });
+      return;
+    }
+
     saveDatabase();
     broadcastSync('entries:imported');
-    res.status(201).json({ importedCount, state: db });
+    res.status(201).json({ importedCount, skippedCount, state: db });
   });
 
   // Create Contract
   app.post('/api/contracts', requireRole(['admin', 'editor'], 'contratos'), (req: Request, res: Response) => {
     const ctx = getAuthContext(req);
     const now = new Date().toISOString();
-    const body = req.body as Partial<Contract>;
+    const body = sanitizeContractBody(req.body);
 
     if (!body.fornecedor || !body.objeto || !body.empresa || !body.departamento) {
       res.status(400).json({
@@ -1210,7 +1335,7 @@ export function createApp() {
       linkDocumento: String(body.linkDocumento || '').trim(),
       status: body.status || 'Ativo',
       obs: String(body.obs || '').trim(),
-      reajustes: Array.isArray(body.reajustes) ? body.reajustes : [],
+      reajustes: [],
       criadoPor: ctx.name,
       criadoEm: now,
       atualizadoPor: ctx.name,
@@ -1235,7 +1360,7 @@ export function createApp() {
     }
 
     const existing = db.contracts[idx];
-    const body = req.body as Partial<Contract>;
+    const body = sanitizeContractBody(req.body);
     const fornecedor =
       body.fornecedor !== undefined
         ? String(body.fornecedor).replace(/\s+/g, ' ').trim().toUpperCase()
@@ -1280,7 +1405,7 @@ export function createApp() {
     };
 
     const pct = Number(percentual);
-    if (!Number.isFinite(pct)) {
+    if (!Number.isFinite(pct) || pct < -100 || pct > 1000) {
       res.status(400).json({ error: 'Informe um percentual de reajuste válido.' });
       return;
     }
@@ -1291,8 +1416,8 @@ export function createApp() {
 
     const adjustment: ContractAdjustment = {
       id: genId('reaj'),
-      data: data || now.slice(0, 10),
-      indice: indice || existing.indiceReajuste,
+      data: cleanDate(data) || now.slice(0, 10),
+      indice: cleanStr(indice, 50) || existing.indiceReajuste,
       percentual: pct,
       valorAnterior,
       valorNovo,
@@ -1328,7 +1453,10 @@ export function createApp() {
         return;
       }
 
-      const { entryIds } = req.body as { entryIds?: string[] };
+      const rawIds = (req.body as { entryIds?: unknown })?.entryIds;
+      const entryIds = Array.isArray(rawIds)
+        ? rawIds.filter((x): x is string => typeof x === 'string')
+        : undefined;
       let linkedCount = 0;
 
       db.entries = db.entries.map((e) => {
@@ -1391,8 +1519,8 @@ export function createApp() {
       return;
     }
 
-    const { tetos } = req.body as { tetos: Record<string, number[]> };
-    if (!tetos || typeof tetos !== 'object') {
+    const tetos = sanitizeTetos((req.body as { tetos?: unknown })?.tetos);
+    if (!tetos) {
       res.status(400).json({ error: 'Estrutura de tetos mensais inválida.' });
       return;
     }
@@ -1448,7 +1576,7 @@ export function createApp() {
     const item: RegistryItem = {
       id: genId(type.slice(0, 3)),
       nome: cleanNome,
-      apelidos: Array.isArray(apelidos) ? apelidos.map((a) => a.trim()).filter(Boolean) : [],
+      apelidos: Array.isArray(apelidos) ? apelidos.map((a) => cleanStr(a)).filter(Boolean) : [],
       criadoPor: ctx.name,
       criadoEm: now,
       atualizadoPor: ctx.name,
@@ -1467,7 +1595,7 @@ export function createApp() {
     const now = new Date().toISOString();
     const type = req.params.type as RegistryType;
     const { id } = req.params;
-    const list = db.registries[type];
+    const list = isRegistryType(type) ? db.registries[type] : undefined;
     if (!list) {
       res.status(400).json({ error: 'Tipo de cadastro inválido.' });
       return;
@@ -1494,7 +1622,7 @@ export function createApp() {
     }
 
     const nextApelidos = new Set(
-      (apelidos !== undefined ? apelidos : existing.apelidos).map((a) => a.trim()).filter(Boolean)
+      (apelidos !== undefined ? apelidos : existing.apelidos).map((a) => cleanStr(a)).filter(Boolean)
     );
 
     if (cleanNome !== existing.nome) {
@@ -1526,7 +1654,7 @@ export function createApp() {
     const ctx = getAuthContext(req);
     const now = new Date().toISOString();
     const type = req.params.type as RegistryType;
-    const list = db.registries[type];
+    const list = isRegistryType(type) ? db.registries[type] : undefined;
     if (!list) {
       res.status(400).json({ error: 'Tipo de cadastro inválido.' });
       return;
@@ -1572,7 +1700,7 @@ export function createApp() {
   app.delete('/api/registries/:type/:id', requireRole(['admin'], 'cadastros'), (req: Request, res: Response) => {
     const type = req.params.type as RegistryType;
     const { id } = req.params;
-    const list = db.registries[type];
+    const list = isRegistryType(type) ? db.registries[type] : undefined;
     if (!list) {
       res.status(400).json({ error: 'Tipo de cadastro inválido.' });
       return;
@@ -1629,3 +1757,16 @@ export function createApp() {
 
   return app;
 }
+
+// Exportado apenas para testes automatizados das regras de validação
+export const __testing = {
+  cleanStr,
+  cleanNum,
+  cleanDate,
+  cleanCompetencia,
+  cleanUrl,
+  sanitizeEntryBody,
+  sanitizeContractBody,
+  sanitizeTetos,
+  redactStateFor,
+};
