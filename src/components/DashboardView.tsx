@@ -2,7 +2,7 @@ import { AlertTriangle, Bell, BookOpen, ChevronRight } from 'lucide-react';
 import { useMemo, useState } from 'react';
 import buddhaDarkImg from '../assets/images/buddha_dark_clean_1795102387887.jpg';
 import buddhaLightImg from '../assets/images/buddha_light_clean_1795102387815.jpg';
-import { AlertItem, DatabaseState } from '../types/buddha';
+import { AlertItem, DatabaseState, isProposal } from '../types/buddha';
 import { formatBRL, formatPercent, MONTH_FULL_LABELS, MONTH_LABELS, sumArray } from '../utils/format';
 import { getAvailableYears } from '../utils/years';
 import { KpiCardWithTooltip } from './KpiCardWithTooltip';
@@ -45,6 +45,7 @@ export function DashboardView({
 
   const filteredContracts = useMemo(() => {
     return state.contracts.filter((c) => {
+      if (isProposal(c)) return false;
       if (empresaFilter !== 'all' && c.empresa !== empresaFilter) return false;
       if (deptoFilter !== 'all' && c.departamento !== deptoFilter) return false;
       return true;

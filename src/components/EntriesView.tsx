@@ -20,6 +20,7 @@ import {
   ENTRY_STATUSES,
   Entry,
   EntryStatus,
+  isProposal,
 } from '../types/buddha';
 import { exportFilteredEntriesToExcel } from '../utils/exports';
 import {
@@ -204,8 +205,9 @@ export function EntriesView({
   // Contracts filtered by selected supplier in drawer + auto-suggest when exactly 1 match
   const matchingContractsForForm = useMemo(() => {
     const sup = formFornecedor.trim().toUpperCase();
-    if (!sup) return state.contracts;
-    return state.contracts.filter((c) => c.fornecedor.toUpperCase() === sup);
+    const onlyContracts = state.contracts.filter((c) => !isProposal(c));
+    if (!sup) return onlyContracts;
+    return onlyContracts.filter((c) => c.fornecedor.toUpperCase() === sup);
   }, [formFornecedor, state.contracts]);
 
   const handleFornecedorChange = (val: string) => {
@@ -215,7 +217,9 @@ export function EntriesView({
       setFormContratoId('');
       return;
     }
-    const matches = state.contracts.filter((c) => c.fornecedor.toUpperCase() === upper);
+    const matches = state.contracts.filter(
+      (c) => !isProposal(c) && c.fornecedor.toUpperCase() === upper
+    );
     if (matches.length === 1) {
       setFormContratoId(matches[0].id);
     } else if (!matches.some((m) => m.id === formContratoId)) {
@@ -646,7 +650,7 @@ export function EntriesView({
               className="px-2 py-0.5 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded text-[11px]"
             >
               <option value="all">Contrato: Todos</option>
-              {state.contracts.map((c) => (
+              {state.contracts.filter((c) => !isProposal(c)).map((c) => (
                 <option key={c.id} value={c.id}>
                   {c.fornecedor} ({c.empresa})
                 </option>

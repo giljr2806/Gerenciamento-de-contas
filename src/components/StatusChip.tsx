@@ -1,5 +1,5 @@
 import { AlertTriangle, CheckCircle2, Clock, PauseCircle, XCircle } from 'lucide-react';
-import { AlertSeverity, ContractStatus, EntryStatus } from '../types/buddha';
+import { AlertSeverity, ContractStatus, EntryStatus, ProposalStatus } from '../types/buddha';
 
 export function HealthChip({
   severity,
@@ -55,8 +55,24 @@ export function EntryStatusChip({ status }: { status: EntryStatus }) {
   }
 }
 
-export function ContractStatusChip({ status }: { status: ContractStatus }) {
+export function ContractStatusChip({ status }: { status: ContractStatus | ProposalStatus }) {
   switch (status) {
+    case 'Em análise':
+      return (
+        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-medium bg-violet-50 text-violet-700 border border-violet-200 dark:bg-violet-950/50 dark:text-violet-300 dark:border-violet-900 whitespace-nowrap">
+          <Clock className="w-3 h-3 shrink-0" aria-hidden="true" />
+          <span>Em análise</span>
+        </span>
+      );
+    case 'Aprovada':
+      return <HealthChip severity="ok" label="Aprovada" />;
+    case 'Recusada':
+      return (
+        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-medium bg-slate-100 text-slate-500 border border-slate-200 dark:bg-slate-800 dark:text-slate-400 dark:border-slate-700 whitespace-nowrap">
+          <XCircle className="w-3 h-3 shrink-0" aria-hidden="true" />
+          <span>Recusada</span>
+        </span>
+      );
     case 'Ativo':
       return <HealthChip severity="ok" label="Ativo" />;
     case 'A completar':

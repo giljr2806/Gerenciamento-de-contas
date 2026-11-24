@@ -17,8 +17,12 @@ import {
   AlertSeverity,
   CONTRACT_STATUSES,
   Contract,
+  ContractKind,
   ContractStatus,
   DatabaseState,
+  isProposal,
+  PROPOSAL_STATUSES,
+  ProposalStatus,
 } from '../types/buddha';
 import {
   daysUntil,
@@ -70,6 +74,7 @@ export function ContractsView({
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
   const [empFilter, setEmpFilter] = useState('all');
+  const [kindFilter, setKindFilter] = useState<'all' | ContractKind>('all');
 
   const [lastTrigger, setLastTrigger] = useState(createTrigger);
   const [creatingNew, setCreatingNew] = useState(false);
@@ -94,7 +99,8 @@ export function ContractsView({
   const [fFormaPgto, setFFormaPgto] = useState('Boleto bancário');
   const [fDiaVenc, setFDiaVenc] = useState('10');
   const [fLinkDoc, setFLinkDoc] = useState('');
-  const [fStatus, setFStatus] = useState<ContractStatus>('Ativo');
+  const [fStatus, setFStatus] = useState<ContractStatus | ProposalStatus>('Ativo');
+  const [fTipo, setFTipo] = useState<ContractKind>('contrato');
   const [fObs, setFObs] = useState('');
   const [formMsg, setFormMsg] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
@@ -138,6 +144,7 @@ export function ContractsView({
     setFDiaVenc(String(c.diaVencimento));
     setFLinkDoc(c.linkDocumento);
     setFStatus(c.status);
+    setFTipo(isProposal(c) ? 'proposta' : 'contrato');
     setFObs(c.obs);
     setAdjIndice(c.indiceReajuste);
     setFormMsg(null);
@@ -151,10 +158,11 @@ export function ContractsView({
     }
   }, [selectedContract]);
 
-  const openNewContract = () => {
+  const openNewContract = (kind: ContractKind = 'contrato') => {
     onSelectContract(null);
     setCreatingNew(true);
     setDetailTab('dados');
+    setFTipo(kind);
     setFFornecedor('');
     setFCnpj('');
     setFObjeto('');
@@ -162,8 +170,9 @@ export function ContractsView({
     setFEmpresa(state.registries.empresas[0]?.nome || '');
     setFDepto(state.registries.departamentos[0]?.nome || '');
     setFResp('DHO Buddha Spa');
-    setFInicio(`${activeYear}-01-01`);
-    setFFim(`${activeYear + 1}-12-31`);
+    // proposta nasce sem datas; contrato mantém os padrões de antes
+    setFInicio(kind === 'proposta' ? '' : `${activeYear}-01-01`);
+    setFFim(kind === 'proposta' ? '' : `${activeYear + 1}-12-31`);
     setFRenovAuto(false);
     setFAvisoDias('30');
     setFValorMensal('0');
@@ -173,14 +182,14 @@ export function ContractsView({
     setFFormaPgto('Boleto bancário');
     setFDiaVenc('10');
     setFLinkDoc('');
-    setFStatus('Ativo');
+    setFStatus(kind === 'proposta' ? 'Em análise' : 'Ativo');
     setFObs('');
     setFormMsg(null);
   };
 
   if (createTrigger !== lastTrigger) {
     setLastTrigger(createTrigger);
-    if (canEdit) openNewContract();
+    if (canEdit) openNewContract('contrato');
   }
 
   // Paid in year per contract
@@ -195,28 +204,36 @@ export function ContractsView({
   }, [state.entries, activeYear]);
 
   const summary = useMemo(() => {
-    const active = state.contracts.filter(
+    // propostas ficam fora dos totais de contratos
+    const onlyContracts = state.contracts.filter((c) => !isProposal(c));
+    const active = onlyContracts.filter(
       (c) => c.status === 'Ativo' || c.status === 'A completar' || c.status === 'Em negociação'
     );
+    const proposalsOpen = state.contracts.filter(
+      (c) => isProposal(c) && c.status === 'Em análise'
+    ).length;
     const monthly = active.reduce((s, c) => s + c.valorMensal, 0);
     const expiring90 = active.filter((c) => daysUntil(c.fim) <= 90).length;
     const adjustmentDue45 = active.filter((c) => {
       const days = daysUntilDataBase(c.mesDataBase);
       return days >= 0 && days <= 45;
     }).length;
-    const toComplete = state.contracts.filter((c) => c.status === 'A completar').length;
+    const toComplete = onlyContracts.filter((c) => c.status === 'A completar').length;
     return {
       activeCount: active.length,
       monthly,
       expiring90,
       adjustmentDue45,
       toComplete,
+      proposalsOpen,
     };
   }, [state.contracts]);
 
   const filteredContracts = useMemo(() => {
     const q = search.trim().toLowerCase();
     return state.contracts.filter((c) => {
+      if (kindFilter === 'contrato' && isProposal(c)) return false;
+      if (kindFilter === 'proposta' && !isProposal(c)) return false;
       if (statusFilter !== 'all' && c.status !== statusFilter) return false;
       if (empFilter !== 'all' && c.empresa !== empFilter) return false;
       if (q) {
@@ -230,9 +247,10 @@ export function ContractsView({
       }
       return true;
     });
-  }, [state.contracts, statusFilter, empFilter, search]);
+  }, [state.contracts, kindFilter, statusFilter, empFilter, search]);
 
   const getContractSituation = (c: Contract): { severity: AlertSeverity; label: string } => {
+    if (isProposal(c)) return { severity: 'ok', label: c.status };
     if (c.status === 'Encerrado' || c.status === 'Suspenso') {
       return { severity: 'ok', label: c.status };
     }
@@ -255,13 +273,29 @@ export function ContractsView({
     return { severity: 'ok', label: 'OK' };
   };
 
-  const handleSaveContract = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const saveForm = async (convertToContract: boolean) => {
     setFormMsg(null);
     if (!fFornecedor.trim() || !fObjeto.trim() || !fEmpresa || !fDepto) {
       setFormMsg('Preencha fornecedor, objeto, empresa e departamento.');
       return;
     }
+    if (convertToContract && (!fInicio || !fFim)) {
+      setFormMsg('Para converter em contrato, informe as datas de início e fim da vigência.');
+      return;
+    }
+    if (fInicio && fFim && fFim < fInicio) {
+      setFormMsg('A data de fim não pode ser anterior à data de início.');
+      return;
+    }
+
+    const tipo: ContractKind = convertToContract ? 'contrato' : fTipo;
+    const status: ContractStatus | ProposalStatus = convertToContract
+      ? 'Ativo'
+      : tipo === 'proposta'
+      ? PROPOSAL_STATUSES.includes(fStatus as ProposalStatus)
+        ? fStatus
+        : 'Em análise'
+      : fStatus;
 
     setSaving(true);
     try {
@@ -280,13 +314,15 @@ export function ContractsView({
         renovacaoAutomatica: fRenovAuto,
         avisoPrevioDias: Math.max(0, parseInt(fAvisoDias, 10) || 30),
         valorMensal: vm,
-        valorTotal: vt > 0 ? vt : Math.round(vm * 12 * 100) / 100,
+        // proposta não assume 12 meses: o total é o que foi informado
+        valorTotal: vt > 0 || tipo === 'proposta' ? vt : Math.round(vm * 12 * 100) / 100,
         indiceReajuste: fIndice,
         mesDataBase: Math.min(12, Math.max(1, parseInt(fMesBase, 10) || 1)),
         formaPagamento: fFormaPgto.trim(),
         diaVencimento: Math.min(31, Math.max(1, parseInt(fDiaVenc, 10) || 10)),
         linkDocumento: fLinkDoc.trim(),
-        status: fStatus,
+        status,
+        tipo,
         obs: fObs.trim(),
       };
 
@@ -295,13 +331,25 @@ export function ContractsView({
         setCreatingNew(false);
       } else if (selectedContract) {
         await onUpdateContract(selectedContract.id, payload);
-        setFormMsg('Dados do contrato atualizados.');
+        setFormMsg(
+          convertToContract
+            ? 'Proposta convertida em contrato.'
+            : tipo === 'proposta'
+            ? 'Dados da proposta atualizados.'
+            : 'Dados do contrato atualizados.'
+        );
+        if (convertToContract) setFTipo('contrato');
       }
     } catch (err) {
-      setFormMsg(err instanceof Error ? err.message : 'Erro ao salvar contrato.');
+      setFormMsg(err instanceof Error ? err.message : 'Erro ao salvar.');
     } finally {
       setSaving(false);
     }
+  };
+
+  const handleSaveContract = (e: React.FormEvent) => {
+    e.preventDefault();
+    return saveForm(false);
   };
 
   const handleApplyAdj = async (e: React.FormEvent) => {
@@ -357,11 +405,13 @@ export function ContractsView({
   };
 
   const drawerVisible = creatingNew || Boolean(selectedContract);
+  const formIsProposal = fTipo === 'proposta';
+  const kindLabel = formIsProposal ? 'Proposta' : 'Contrato';
 
   return (
     <div className="space-y-4">
       {/* Summary Strip */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-6 gap-4">
         <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl px-4 py-3.5">
           <div className="text-xs text-slate-500 dark:text-slate-400">Contratos Ativos</div>
           <div className="font-mono text-xl font-semibold text-slate-900 dark:text-slate-100 tabular-nums mt-1">
@@ -410,6 +460,12 @@ export function ContractsView({
             {summary.toComplete}
           </div>
         </div>
+        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl px-4 py-3.5">
+          <div className="text-xs text-slate-500 dark:text-slate-400">Propostas em análise</div>
+          <div className="font-mono text-xl font-semibold text-violet-700 dark:text-violet-400 tabular-nums mt-1">
+            {summary.proposalsOpen}
+          </div>
+        </div>
       </div>
 
       {/* Filters */}
@@ -427,13 +483,27 @@ export function ContractsView({
           </div>
 
           <select
+            value={kindFilter}
+            onChange={(e) => setKindFilter(e.target.value as 'all' | ContractKind)}
+            aria-label="Filtrar por tipo (contrato ou proposta)"
+            className="text-xs bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-800 dark:text-slate-100 rounded-lg px-2.5 py-1.5"
+          >
+            <option value="all">Contratos e Propostas</option>
+            <option value="contrato">Somente Contratos</option>
+            <option value="proposta">Somente Propostas</option>
+          </select>
+
+          <select
             value={statusFilter}
             onChange={(e) => setStatusFilter(e.target.value)}
-            aria-label="Filtrar por status do contrato"
+            aria-label="Filtrar por status"
             className="text-xs bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-800 dark:text-slate-100 rounded-lg px-2.5 py-1.5"
           >
             <option value="all">Todos Status</option>
-            {CONTRACT_STATUSES.map((s) => (
+            {[
+              ...(kindFilter === 'proposta' ? [] : CONTRACT_STATUSES),
+              ...(kindFilter === 'contrato' ? [] : PROPOSAL_STATUSES),
+            ].map((s) => (
               <option key={s} value={s}>
                 {s}
               </option>
@@ -456,14 +526,24 @@ export function ContractsView({
         </div>
 
         {canEdit && (
-          <button
-            type="button"
-            onClick={openNewContract}
-            className="inline-flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-semibold text-white bg-blue-700 rounded-lg hover:bg-blue-800 whitespace-nowrap"
-          >
-            <Plus className="w-3.5 h-3.5" aria-hidden="true" />
-            <span>Novo Contrato</span>
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => openNewContract('proposta')}
+              className="inline-flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-semibold text-violet-700 dark:text-violet-300 bg-violet-50 dark:bg-violet-950/40 border border-violet-200 dark:border-violet-900 rounded-lg hover:bg-violet-100 dark:hover:bg-violet-950 whitespace-nowrap"
+            >
+              <Plus className="w-3.5 h-3.5" aria-hidden="true" />
+              <span>Nova Proposta</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => openNewContract('contrato')}
+              className="inline-flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-semibold text-white bg-blue-700 rounded-lg hover:bg-blue-800 whitespace-nowrap"
+            >
+              <Plus className="w-3.5 h-3.5" aria-hidden="true" />
+              <span>Novo Contrato</span>
+            </button>
+          </div>
         )}
       </div>
 
@@ -494,6 +574,7 @@ export function ContractsView({
                 const elapsedMonths = elapsedContractMonthsInYear(c.inicio, c.fim, activeYear);
                 const expectedYear = c.valorMensal * elapsedMonths;
                 const sit = getContractSituation(c);
+                const prop = isProposal(c);
 
                 return (
                   <tr
@@ -510,6 +591,11 @@ export function ContractsView({
                   >
                     <td className="py-3 px-4 max-w-xs">
                       <div className="font-semibold text-slate-900 dark:text-slate-100 truncate">
+                        {prop && (
+                          <span className="mr-1.5 px-1.5 py-0.5 rounded text-[10px] font-semibold uppercase bg-violet-100 text-violet-700 dark:bg-violet-950 dark:text-violet-300 align-middle">
+                            Proposta
+                          </span>
+                        )}
                         {c.fornecedor}
                       </div>
                       <div className="text-[11px] text-slate-500 dark:text-slate-400 truncate">
@@ -523,39 +609,63 @@ export function ContractsView({
                       </div>
                     </td>
                     <td className="py-3 px-4 text-right font-mono font-semibold text-slate-900 dark:text-slate-100 tabular-nums whitespace-nowrap">
-                      {formatBRL(c.valorMensal)}
+                      {prop && c.valorMensal === 0 && c.valorTotal > 0 ? (
+                        <span title="Valor total da proposta">{formatBRL(c.valorTotal)}</span>
+                      ) : (
+                        formatBRL(c.valorMensal)
+                      )}
                     </td>
                     <td className="py-3 px-4 whitespace-nowrap">
-                      <div className="font-mono text-slate-800 dark:text-slate-200 tabular-nums">
-                        {formatDateBR(c.inicio)} → {formatDateBR(c.fim)}
-                      </div>
-                      <div
-                        className={`text-[11px] tabular-nums ${
-                          daysLeft < 0
-                            ? 'text-red-700 dark:text-red-400 font-semibold'
-                            : daysLeft <= 60
-                            ? 'text-amber-700 dark:text-amber-400'
-                            : 'text-slate-500 dark:text-slate-400'
-                        }`}
-                      >
-                        {daysLeft < 0
-                          ? `Vencido há ${Math.abs(daysLeft)}d`
-                          : `${daysLeft} dia(s) restante(s)`}
-                      </div>
+                      {prop && !c.inicio && !c.fim ? (
+                        <div className="text-slate-400 dark:text-slate-500">Sem vigência definida</div>
+                      ) : (
+                        <>
+                          <div className="font-mono text-slate-800 dark:text-slate-200 tabular-nums">
+                            {formatDateBR(c.inicio)} → {formatDateBR(c.fim)}
+                          </div>
+                          {!prop && (
+                            <div
+                              className={`text-[11px] tabular-nums ${
+                                daysLeft < 0
+                                  ? 'text-red-700 dark:text-red-400 font-semibold'
+                                  : daysLeft <= 60
+                                  ? 'text-amber-700 dark:text-amber-400'
+                                  : 'text-slate-500 dark:text-slate-400'
+                              }`}
+                            >
+                              {daysLeft < 0
+                                ? `Vencido há ${Math.abs(daysLeft)}d`
+                                : `${daysLeft} dia(s) restante(s)`}
+                            </div>
+                          )}
+                        </>
+                      )}
                     </td>
                     <td className="py-3 px-4 whitespace-nowrap text-slate-700 dark:text-slate-300">
-                      <div>{c.indiceReajuste}</div>
-                      <div className="text-[11px] text-slate-500 dark:text-slate-400">
-                        Data-base: {MONTH_LABELS[(c.mesDataBase - 1) % 12]}
-                      </div>
+                      {prop ? (
+                        <span className="text-slate-400 dark:text-slate-500">—</span>
+                      ) : (
+                        <>
+                          <div>{c.indiceReajuste}</div>
+                          <div className="text-[11px] text-slate-500 dark:text-slate-400">
+                            Data-base: {MONTH_LABELS[(c.mesDataBase - 1) % 12]}
+                          </div>
+                        </>
+                      )}
                     </td>
                     <td className="py-3 px-4 text-right font-mono tabular-nums whitespace-nowrap">
-                      <div className="font-semibold text-slate-900 dark:text-slate-100">
-                        {formatBRL(paidYear)}
-                      </div>
-                      <div className="text-[11px] text-slate-500 dark:text-slate-400">
-                        Esp.: {formatBRL(expectedYear)} ({elapsedMonths}m)
-                      </div>
+                      {prop ? (
+                        <span className="text-slate-400 dark:text-slate-500">—</span>
+                      ) : (
+                        <>
+                          <div className="font-semibold text-slate-900 dark:text-slate-100">
+                            {formatBRL(paidYear)}
+                          </div>
+                          <div className="text-[11px] text-slate-500 dark:text-slate-400">
+                            Esp.: {formatBRL(expectedYear)} ({elapsedMonths}m)
+                          </div>
+                        </>
+                      )}
                     </td>
                     <td className="py-3 px-4 whitespace-nowrap">
                       <div className="flex flex-col items-start gap-1">
@@ -619,7 +729,7 @@ export function ContractsView({
                           <div className="flex justify-center gap-2 pt-1">
                             <button
                               type="button"
-                              onClick={openNewContract}
+                              onClick={() => openNewContract('contrato')}
                               className="inline-flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-semibold text-white bg-blue-700 rounded-lg hover:bg-blue-800"
                             >
                               <Plus className="w-3.5 h-3.5" />
@@ -648,11 +758,15 @@ export function ContractsView({
                 <div className="min-w-0">
                   <div className="text-[11px] font-mono text-slate-500 dark:text-slate-400">
                     {creatingNew
-                      ? 'Novo Contrato'
-                      : `${selectedContract?.empresa} · ${selectedContract?.departamento}`}
+                      ? `Nov${formIsProposal ? 'a' : 'o'} ${kindLabel}`
+                      : `${formIsProposal ? 'Proposta · ' : ''}${selectedContract?.empresa} · ${selectedContract?.departamento}`}
                   </div>
                   <h3 className="font-display text-lg font-semibold text-slate-900 dark:text-slate-100 truncate">
-                    {creatingNew ? 'Cadastrar Contrato DHO' : selectedContract?.fornecedor}
+                    {creatingNew
+                      ? formIsProposal
+                        ? 'Cadastrar Proposta DHO'
+                        : 'Cadastrar Contrato DHO'
+                      : selectedContract?.fornecedor}
                   </h3>
                 </div>
                 <button
@@ -667,7 +781,7 @@ export function ContractsView({
                 </button>
               </div>
 
-              {!creatingNew && (
+              {!creatingNew && !formIsProposal && (
                 <div className="inline-flex p-1 bg-slate-100 dark:bg-slate-800 rounded-lg">
                   {(
                     [
@@ -698,7 +812,7 @@ export function ContractsView({
 
             <div className="p-6 text-xs flex-1 space-y-5">
               {/* TAB 1: DADOS */}
-              {(creatingNew || detailTab === 'dados') && (
+              {(creatingNew || formIsProposal || detailTab === 'dados') && (
                 <form onSubmit={handleSaveContract} className="space-y-4">
                   {formMsg && (
                     <div className="p-3 bg-blue-50 dark:bg-blue-950/60 border border-blue-200 dark:border-blue-900 rounded-lg text-blue-900 dark:text-blue-200">
@@ -742,7 +856,7 @@ export function ContractsView({
 
                     <div>
                       <label className="block font-medium text-slate-700 dark:text-slate-300 mb-1">
-                        Objeto do Contrato *
+                        Objeto {formIsProposal ? 'da Proposta' : 'do Contrato'} *
                       </label>
                       <input
                         type="text"
@@ -807,7 +921,7 @@ export function ContractsView({
                     <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
                       <div>
                         <label className="block font-medium text-slate-700 dark:text-slate-300 mb-1">
-                          Início
+                          Início{formIsProposal ? ' (opcional)' : ''}
                         </label>
                         <input
                           type="date"
@@ -818,7 +932,7 @@ export function ContractsView({
                       </div>
                       <div>
                         <label className="block font-medium text-slate-700 dark:text-slate-300 mb-1">
-                          Fim
+                          Fim{formIsProposal ? ' (opcional)' : ''}
                         </label>
                         <input
                           type="date"
@@ -827,29 +941,33 @@ export function ContractsView({
                           className="w-full px-3 py-2 font-mono bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg text-slate-900 dark:text-slate-100"
                         />
                       </div>
-                      <div>
-                        <label className="block font-medium text-slate-700 dark:text-slate-300 mb-1">
-                          Aviso Prévio (dias)
-                        </label>
-                        <input
-                          type="number"
-                          min={0}
-                          value={fAvisoDias}
-                          onChange={(e) => setFAvisoDias(e.target.value)}
-                          className="w-full px-3 py-2 font-mono bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg text-slate-900 dark:text-slate-100"
-                        />
-                      </div>
-                      <div className="flex items-end pb-2">
-                        <label className="inline-flex items-center gap-2 cursor-pointer text-slate-700 dark:text-slate-300">
-                          <input
-                            type="checkbox"
-                            checked={fRenovAuto}
-                            onChange={(e) => setFRenovAuto(e.target.checked)}
-                            className="rounded border-slate-300 text-blue-700"
-                          />
-                          <span>Renovação auto</span>
-                        </label>
-                      </div>
+                      {!formIsProposal && (
+                        <>
+                          <div>
+                            <label className="block font-medium text-slate-700 dark:text-slate-300 mb-1">
+                              Aviso Prévio (dias)
+                            </label>
+                            <input
+                              type="number"
+                              min={0}
+                              value={fAvisoDias}
+                              onChange={(e) => setFAvisoDias(e.target.value)}
+                              className="w-full px-3 py-2 font-mono bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg text-slate-900 dark:text-slate-100"
+                            />
+                          </div>
+                          <div className="flex items-end pb-2">
+                            <label className="inline-flex items-center gap-2 cursor-pointer text-slate-700 dark:text-slate-300">
+                              <input
+                                type="checkbox"
+                                checked={fRenovAuto}
+                                onChange={(e) => setFRenovAuto(e.target.checked)}
+                                className="rounded border-slate-300 text-blue-700"
+                              />
+                              <span>Renovação auto</span>
+                            </label>
+                          </div>
+                        </>
+                      )}
                     </div>
 
                     <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
@@ -875,7 +993,7 @@ export function ContractsView({
                           className="w-full px-3 py-2 font-mono bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg text-slate-900 dark:text-slate-100"
                         />
                       </div>
-                      <div>
+                      <div className={formIsProposal ? 'hidden' : ''}>
                         <label className="block font-medium text-slate-700 dark:text-slate-300 mb-1">
                           Índice Reajuste
                         </label>
@@ -891,7 +1009,7 @@ export function ContractsView({
                           ))}
                         </select>
                       </div>
-                      <div>
+                      <div className={formIsProposal ? 'hidden' : ''}>
                         <label className="block font-medium text-slate-700 dark:text-slate-300 mb-1">
                           Mês Data-Base (1-12)
                         </label>
@@ -932,7 +1050,7 @@ export function ContractsView({
                           className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg text-slate-900 dark:text-slate-100"
                         />
                       </div>
-                      <div>
+                      <div className={formIsProposal ? 'hidden' : ''}>
                         <label className="block font-medium text-slate-700 dark:text-slate-300 mb-1">
                           Dia Vencimento
                         </label>
@@ -951,10 +1069,10 @@ export function ContractsView({
                         </label>
                         <select
                           value={fStatus}
-                          onChange={(e) => setFStatus(e.target.value as ContractStatus)}
+                          onChange={(e) => setFStatus(e.target.value as ContractStatus | ProposalStatus)}
                           className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg text-slate-900 dark:text-slate-100"
                         >
-                          {CONTRACT_STATUSES.map((s) => (
+                          {(formIsProposal ? PROPOSAL_STATUSES : CONTRACT_STATUSES).map((s) => (
                             <option key={s} value={s}>
                               {s}
                             </option>
@@ -1024,13 +1142,24 @@ export function ContractsView({
                           className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-medium text-red-700 dark:text-red-400 bg-red-50 dark:bg-red-950/40 border border-red-200 dark:border-red-900 rounded-lg hover:bg-red-100 dark:hover:bg-red-950"
                         >
                           <Trash2 className="w-3.5 h-3.5" aria-hidden="true" />
-                          <span>Excluir Contrato</span>
+                          <span>Excluir {kindLabel}</span>
                         </button>
                       ) : (
                         <span />
                       )}
 
                       <div className="flex items-center gap-2">
+                        {!creatingNew && formIsProposal && (
+                          <button
+                            type="button"
+                            disabled={saving}
+                            onClick={() => saveForm(true)}
+                            title="Transforma a proposta em contrato ativo (exige datas de início e fim)"
+                            className="px-4 py-2 text-xs font-semibold text-emerald-800 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-900 rounded-lg hover:bg-emerald-100 dark:hover:bg-emerald-950 disabled:opacity-60"
+                          >
+                            Converter em Contrato
+                          </button>
+                        )}
                         <button
                           type="button"
                           onClick={() => {
@@ -1049,7 +1178,7 @@ export function ContractsView({
                           {saving
                             ? 'Salvando...'
                             : creatingNew
-                            ? 'Cadastrar Contrato'
+                            ? `Cadastrar ${kindLabel}`
                             : 'Salvar Alterações'}
                         </button>
                       </div>
@@ -1059,7 +1188,7 @@ export function ContractsView({
               )}
 
               {/* TAB 2: VALORES E REAJUSTES */}
-              {!creatingNew && selectedContract && detailTab === 'reajustes' && (
+              {!creatingNew && !formIsProposal && selectedContract && detailTab === 'reajustes' && (
                 <div className="space-y-4">
                   <div className="p-4 bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 rounded-xl flex flex-wrap items-center justify-between gap-3">
                     <div>
@@ -1200,7 +1329,7 @@ export function ContractsView({
               )}
 
               {/* TAB 3: LANÇAMENTOS VINCULADOS */}
-              {!creatingNew && selectedContract && detailTab === 'lancamentos' && (
+              {!creatingNew && !formIsProposal && selectedContract && detailTab === 'lancamentos' && (
                 <div className="space-y-4">
                   <div className="p-4 bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 rounded-xl flex flex-wrap items-center justify-between gap-3">
                     <div>
@@ -1288,10 +1417,12 @@ export function ContractsView({
 
       <ConfirmDialog
         open={Boolean(deleteTarget)}
-        title="Excluir Contrato"
+        title={deleteTarget && isProposal(deleteTarget) ? 'Excluir Proposta' : 'Excluir Contrato'}
         description={
           deleteTarget
-            ? `Confirma a exclusão do contrato com ${deleteTarget.fornecedor} (${deleteTarget.empresa})? Os lançamentos vinculados a ele serão automaticamente desvinculados.`
+            ? isProposal(deleteTarget)
+              ? `Confirma a exclusão da proposta de ${deleteTarget.fornecedor} (${deleteTarget.empresa})?`
+              : `Confirma a exclusão do contrato com ${deleteTarget.fornecedor} (${deleteTarget.empresa})? Os lançamentos vinculados a ele serão automaticamente desvinculados.`
             : ''
         }
         confirmLabel="Excluir e Desvincular"
