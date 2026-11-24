@@ -14,5 +14,10 @@ const firebaseConfig = {
 
 export const firebaseConfigured = Boolean(firebaseConfig.apiKey && firebaseConfig.projectId);
 
-const app = initializeApp(firebaseConfig);
+// Sem configuração, usa um valor de fachada só para o SDK não lançar erro na carga
+// (isso deixaria a tela em branco). A tela de login avisa e bloqueia o acesso.
+const app = initializeApp({
+  ...firebaseConfig,
+  apiKey: firebaseConfig.apiKey || 'not-configured',
+});
 export const auth = getAuth(app);
