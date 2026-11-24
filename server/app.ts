@@ -1,7 +1,7 @@
 import crypto from 'crypto';
 import express, { NextFunction, Request, Response } from 'express';
-import { DEFAULT_USERS } from '../src/shared/seedBuddha';
-import { adminAuth } from './firebaseAdmin';
+import { DEFAULT_USERS } from '../src/shared/seedBuddha.js';
+import { adminAuth } from './firebaseAdmin.js';
 import {
   buildFirstRunDatabase,
   loadAuthStore,
@@ -11,7 +11,7 @@ import {
   VersionConflictError,
   writeDatabase,
   type DeveloperAuthStore,
-} from './store';
+} from './store.js';
 import {
   AnnualPlan,
   Contract,
@@ -24,7 +24,7 @@ import {
   UserPermissions,
   UserProfile,
   UserRole,
-} from '../src/types/buddha';
+} from '../src/types/buddha.js';
 
 function genId(prefix: string): string {
   return `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;

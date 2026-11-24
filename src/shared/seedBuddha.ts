@@ -5,7 +5,7 @@ import {
   Registries,
   RegistryItem,
   UserProfile,
-} from '../types/buddha';
+} from '../types/buddha.js';
 
 const SYSTEM_AUTHOR = 'Desenvolvedor DHO';
 const SEED_TIMESTAMP = new Date().toISOString();
