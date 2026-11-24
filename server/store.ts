@@ -85,7 +85,10 @@ export async function readDatabase(): Promise<DatabaseState | null> {
  * se outro processo gravou entre a nossa leitura e a nossa escrita, falha com
  * VersionConflictError em vez de sobrescrever os dados dele.
  */
-export async function writeDatabase(next: DatabaseState, expectedVersion: number | null) {
+export async function writeDatabase(input: DatabaseState, expectedVersion: number | null) {
+  // O Firestore rejeita valores `undefined` (ex.: lançamento sem contratoId).
+  // Passar por JSON remove esses campos e garante apenas dados serializáveis.
+  const next = JSON.parse(JSON.stringify(input)) as DatabaseState;
   const metaRef = col().doc('meta');
   const entryChunks = chunk(next.entries);
   const contractChunks = chunk(next.contracts);
