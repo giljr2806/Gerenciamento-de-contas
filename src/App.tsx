@@ -173,6 +173,13 @@ export default function App() {
             <RefreshCw className="w-4 h-4" aria-hidden="true" />
             <span>Tentar novamente</span>
           </button>
+          <button
+            type="button"
+            onClick={store.logout}
+            className="w-full px-4 py-2 text-sm font-semibold text-slate-700 dark:text-slate-200 border border-slate-300 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800 rounded-lg transition-colors"
+          >
+            Sair e entrar novamente
+          </button>
         </div>
       </div>
     );

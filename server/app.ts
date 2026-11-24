@@ -442,6 +442,43 @@ export function createApp() {
     next();
   });
 
+  // Diagnóstico público e SEM segredos: mostra o que o servidor enxerga na configuração.
+  app.get('/api/health', async (_req: Request, res: Response) => {
+    const env = process.env;
+    const key = env.FIREBASE_PRIVATE_KEY || '';
+    const info: Record<string, unknown> = {
+      node: process.version,
+      projectId: env.FIREBASE_PROJECT_ID || null,
+      clientEmail: env.FIREBASE_CLIENT_EMAIL || null,
+      privateKey: {
+        presente: key.length > 0,
+        comecaComBegin: key.replace(/^["'\s]+/, '').startsWith('-----BEGIN PRIVATE KEY-----'),
+        terminaComEnd: key.replace(/["'\s]+$/, '').replace(/\\n$/, '').trim().endsWith('-----END PRIVATE KEY-----'),
+        temQuebrasReais: key.includes('\n'),
+        temBarraNLiteral: key.includes('\\n'),
+        comAspasNasPontas: /^["']|["']$/.test(key.trim()),
+        tamanho: key.length,
+      },
+      vars: {
+        SESSION_SECRET: Boolean(env.SESSION_SECRET && env.SESSION_SECRET.length >= 32),
+        DEVELOPER_ACCESS_CODE: Boolean(env.DEVELOPER_ACCESS_CODE),
+        BOOTSTRAP_DEVELOPER_EMAIL: env.BOOTSTRAP_DEVELOPER_EMAIL || null,
+      },
+    };
+    try {
+      await adminAuth().listUsers(1);
+      info.firebaseAuth = 'ok';
+    } catch (err) {
+      info.firebaseAuth = `ERRO ${(err as { code?: string })?.code || ''}: ${String((err as Error)?.message).slice(0, 200)}`;
+    }
+    try {
+      info.firestoreVersion = await readVersion();
+    } catch (err) {
+      info.firestore = `ERRO ${(err as { code?: string })?.code || ''}: ${String((err as Error)?.message).slice(0, 200)}`;
+    }
+    res.json(info);
+  });
+
   // Tudo em /api exige login Firebase válido + usuário ativo cadastrado.
   // Também serializa as requisições, carrega o estado e grava (antes de responder) se houve mudança.
   app.use('/api', (req: Request, res: Response, next: NextFunction) => {
@@ -463,8 +500,15 @@ export function createApp() {
         let decoded;
         try {
           decoded = await adminAuth().verifyIdToken(header.slice(7).trim());
-        } catch {
-          res.status(401).json({ error: 'Sessão expirada ou inválida. Faça login novamente.' });
+        } catch (err) {
+          const code = String((err as { code?: string })?.code || '');
+          console.error('verifyIdToken falhou:', code, (err as Error)?.message);
+          if (code.startsWith('auth/')) {
+            res.status(401).json({ error: 'Sessão expirada ou inválida. Faça login novamente.' });
+          } else {
+            // credenciais do servidor inválidas/ausentes: não é culpa do usuário
+            res.status(500).json({ error: 'Falha de configuração do servidor (credenciais do Firebase).' });
+          }
           return;
         }
         const email = String(decoded.email || '').trim().toLowerCase();
