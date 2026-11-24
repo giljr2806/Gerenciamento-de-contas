@@ -5,10 +5,13 @@ import { getFirestore } from 'firebase-admin/firestore';
 function init() {
   if (getApps().length > 0) return getApps()[0];
 
-  const projectId = process.env.FIREBASE_PROJECT_ID?.trim();
-  const clientEmail = process.env.FIREBASE_CLIENT_EMAIL?.trim();
+  // Remove aspas que às vezes vêm junto ao colar/importar o valor em painéis de hospedagem.
+  const clean = (v?: string) => v?.trim().replace(/^["']|["']$/g, '').trim();
+
+  const projectId = clean(process.env.FIREBASE_PROJECT_ID);
+  const clientEmail = clean(process.env.FIREBASE_CLIENT_EMAIL);
   // A chave privada costuma chegar com "\n" literais (arquivo .env / painel da Vercel).
-  const privateKey = process.env.FIREBASE_PRIVATE_KEY?.replace(/\\n/g, '\n').trim();
+  const privateKey = clean(process.env.FIREBASE_PRIVATE_KEY)?.replace(/\\n/g, '\n');
 
   if (!projectId || !clientEmail || !privateKey) {
     throw new Error(
