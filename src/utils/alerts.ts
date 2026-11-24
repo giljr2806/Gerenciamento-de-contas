@@ -1,4 +1,4 @@
-import { AlertItem, DatabaseState } from '../types/buddha';
+import { AlertItem, DatabaseState, isProposal } from '../types/buddha';
 import {
   daysUntil,
   daysUntilDataBase,
@@ -19,6 +19,7 @@ export function computeSystemAlerts(
   const alerts: AlertItem[] = [];
 
   const filteredContracts = state.contracts.filter((c) => {
+    if (isProposal(c)) return false; // propostas não geram alertas de vigência/reajuste
     if (empresaFilter !== 'all' && c.empresa !== empresaFilter) return false;
     if (deptoFilter !== 'all' && c.departamento !== deptoFilter) return false;
     return true;

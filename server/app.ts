@@ -23,6 +23,9 @@ import {
   Entry,
   ADJUSTMENT_INDICES,
   CONTRACT_STATUSES,
+  PROPOSAL_STATUSES,
+  ProposalStatus,
+  isProposal,
   ENTRY_STATUSES,
   getDefaultPermissionsForRole,
   RegistryItem,
@@ -502,9 +505,28 @@ function sanitizeContractBody(raw: unknown): Partial<Contract> {
   if (r.mesDataBase !== undefined) out.mesDataBase = Math.round(cleanNum(r.mesDataBase, 1, 12)) || 1;
   if (r.diaVencimento !== undefined) out.diaVencimento = Math.round(cleanNum(r.diaVencimento, 1, 31)) || 1;
   if (r.linkDocumento !== undefined) out.linkDocumento = cleanUrl(r.linkDocumento);
-  if (CONTRACT_STATUSES.includes(r.status as ContractStatus)) out.status = r.status as ContractStatus;
+  if (r.tipo === 'contrato' || r.tipo === 'proposta') out.tipo = r.tipo;
+  if (
+    CONTRACT_STATUSES.includes(r.status as ContractStatus) ||
+    PROPOSAL_STATUSES.includes(r.status as ProposalStatus)
+  ) {
+    out.status = r.status as ContractStatus | ProposalStatus;
+  }
   if (r.obs !== undefined) out.obs = cleanStr(r.obs, MAX_LONG, true);
   return out;
+}
+
+/** Status precisa combinar com o tipo (proposta: Em análise/Aprovada/Recusada; contrato: os demais). */
+function statusForKind(
+  kind: 'contrato' | 'proposta',
+  status: string | undefined
+): ContractStatus | ProposalStatus {
+  if (kind === 'proposta') {
+    return PROPOSAL_STATUSES.includes(status as ProposalStatus)
+      ? (status as ProposalStatus)
+      : 'Em análise';
+  }
+  return CONTRACT_STATUSES.includes(status as ContractStatus) ? (status as ContractStatus) : 'Ativo';
 }
 
 /** tetos: { categoria: [12 números >= 0] } — descarta qualquer outra estrutura. */
@@ -1297,9 +1319,12 @@ export function createApp() {
     const now = new Date().toISOString();
     const body = sanitizeContractBody(req.body);
 
+    const kind: 'contrato' | 'proposta' = body.tipo === 'proposta' ? 'proposta' : 'contrato';
+    const noun = kind === 'proposta' ? 'da proposta' : 'do contrato';
+
     if (!body.fornecedor || !body.objeto || !body.empresa || !body.departamento) {
       res.status(400).json({
-        error: 'Preencha os campos obrigatórios do contrato: fornecedor, objeto, empresa e departamento.',
+        error: `Preencha os campos obrigatórios ${noun}: fornecedor, objeto, empresa e departamento.`,
       });
       return;
     }
@@ -1311,6 +1336,8 @@ export function createApp() {
     const valorTotal =
       body.valorTotal !== undefined && Number(body.valorTotal) > 0
         ? Number(body.valorTotal)
+        : kind === 'proposta'
+        ? 0
         : Math.round(valorMensal * 12 * 100) / 100;
 
     const contract: Contract = {
@@ -1322,8 +1349,9 @@ export function createApp() {
       empresa: body.empresa,
       departamento: body.departamento,
       responsavel: String(body.responsavel || ctx.name).trim(),
-      inicio: body.inicio || now.slice(0, 10),
-      fim: body.fim || `${new Date().getFullYear() + 1}-12-31`,
+      // proposta: datas podem ficar vazias; contrato mantém os padrões de antes
+      inicio: kind === 'proposta' ? body.inicio || '' : body.inicio || now.slice(0, 10),
+      fim: kind === 'proposta' ? body.fim || '' : body.fim || `${new Date().getFullYear() + 1}-12-31`,
       renovacaoAutomatica: Boolean(body.renovacaoAutomatica),
       avisoPrevioDias: Math.max(0, Number(body.avisoPrevioDias) || 30),
       valorMensal,
@@ -1333,7 +1361,8 @@ export function createApp() {
       formaPagamento: String(body.formaPagamento || 'Boleto bancário').trim(),
       diaVencimento: Math.min(31, Math.max(1, Number(body.diaVencimento) || 10)),
       linkDocumento: String(body.linkDocumento || '').trim(),
-      status: body.status || 'Ativo',
+      status: statusForKind(kind, body.status),
+      tipo: kind,
       obs: String(body.obs || '').trim(),
       reajustes: [],
       criadoPor: ctx.name,
@@ -1370,11 +1399,35 @@ export function createApp() {
       ensureSupplierInRegistry(fornecedor, ctx.name, now);
     }
 
+    // Tipo final (proposta → contrato = conversão; contrato nunca volta a ser proposta)
+    const existingKind: 'contrato' | 'proposta' = isProposal(existing) ? 'proposta' : 'contrato';
+    const kind: 'contrato' | 'proposta' =
+      existingKind === 'contrato' ? 'contrato' : body.tipo === 'contrato' ? 'contrato' : 'proposta';
+    const converting = existingKind === 'proposta' && kind === 'contrato';
+
+    if (converting) {
+      const inicio = body.inicio ?? existing.inicio;
+      const fim = body.fim ?? existing.fim;
+      if (!inicio || !fim) {
+        res.status(400).json({
+          error: 'Para converter a proposta em contrato, informe as datas de início e fim da vigência.',
+        });
+        return;
+      }
+    }
+
     const updated: Contract = {
       ...existing,
       ...body,
       id: existing.id,
       fornecedor,
+      tipo: kind,
+      status: statusForKind(
+        kind,
+        converting && !CONTRACT_STATUSES.includes(body.status as ContractStatus)
+          ? 'Ativo'
+          : body.status ?? existing.status
+      ),
       criadoPor: existing.criadoPor,
       criadoEm: existing.criadoEm,
       atualizadoPor: ctx.name,
@@ -1395,6 +1448,11 @@ export function createApp() {
     const idx = db.contracts.findIndex((c) => c.id === id);
     if (idx === -1) {
       res.status(404).json({ error: 'Contrato não encontrado.' });
+      return;
+    }
+
+    if (isProposal(db.contracts[idx])) {
+      res.status(400).json({ error: 'Propostas não têm reajuste. Converta em contrato primeiro.' });
       return;
     }
 
@@ -1450,6 +1508,12 @@ export function createApp() {
       const contract = db.contracts.find((c) => c.id === id);
       if (!contract) {
         res.status(404).json({ error: 'Contrato não encontrado.' });
+        return;
+      }
+      if (isProposal(contract)) {
+        res.status(400).json({
+          error: 'Propostas não recebem lançamentos. Converta em contrato primeiro.',
+        });
         return;
       }
 

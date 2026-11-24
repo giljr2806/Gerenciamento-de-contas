@@ -95,6 +95,13 @@ export const CONTRACT_STATUSES: ContractStatus[] = [
   'Encerrado',
 ];
 
+/** Propostas (orçamentos de fornecedores ainda não fechados): datas e reajuste são opcionais. */
+export type ContractKind = 'contrato' | 'proposta';
+
+export type ProposalStatus = 'Em análise' | 'Aprovada' | 'Recusada';
+
+export const PROPOSAL_STATUSES: ProposalStatus[] = ['Em análise', 'Aprovada', 'Recusada'];
+
 export type AdjustmentIndex = 'IPCA' | 'IGP-M' | 'INPC' | 'Fixo' | 'Sem reajuste';
 
 export const ADJUSTMENT_INDICES: AdjustmentIndex[] = [
@@ -160,9 +167,15 @@ export interface Contract extends AuditMeta {
   formaPagamento: string;
   diaVencimento: number;
   linkDocumento: string;
-  status: ContractStatus;
+  status: ContractStatus | ProposalStatus;
+  /** Ausente em registros antigos = 'contrato'. */
+  tipo?: ContractKind;
   obs: string;
   reajustes: ContractAdjustment[];
+}
+
+export function isProposal(c: { tipo?: ContractKind }): boolean {
+  return c.tipo === 'proposta';
 }
 
 export interface AnnualPlan extends AuditMeta {

@@ -25,7 +25,7 @@ import {
 } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import * as XLSX from 'xlsx';
-import { DatabaseState } from '../types/buddha';
+import { DatabaseState, isProposal } from '../types/buddha';
 import {
   formatBRL,
   formatCompetenciaBR,
@@ -864,6 +864,7 @@ export function AnalyticsView({
   // 8. CONTRACT RISK & EXPOSURE INTELLIGENCE
   const contractsAnalytics = useMemo(() => {
     const contracts = state.contracts.filter((c) => {
+      if (isProposal(c)) return false;
       if (empresaFilter !== 'all' && c.empresa !== empresaFilter) return false;
       if (deptoFilter !== 'all' && c.departamento !== deptoFilter) return false;
       if (categoriaFilter !== 'all' && c.categoria !== categoriaFilter) return false;

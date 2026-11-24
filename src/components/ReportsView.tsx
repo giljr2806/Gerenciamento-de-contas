@@ -1,6 +1,6 @@
 import { CheckCircle2, ClipboardCopy, FileDown, FileSpreadsheet } from 'lucide-react';
 import { useMemo, useState } from 'react';
-import { DatabaseState } from '../types/buddha';
+import { DatabaseState, isProposal } from '../types/buddha';
 import {
   copyReportCsvToClipboard,
   exportReportLandscapePdf,
@@ -60,6 +60,7 @@ export function ReportsView({ state, activeYear, onChangeYear }: ReportsViewProp
 
   const filteredContracts = useMemo(() => {
     return state.contracts.filter((c) => {
+      if (isProposal(c)) return false;
       if (empresaFilter !== 'all' && c.empresa !== empresaFilter) return false;
       if (deptoFilter !== 'all' && c.departamento !== deptoFilter) return false;
       return true;
