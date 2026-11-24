@@ -1,6 +1,6 @@
-import { createInitialDatabase } from '../src/shared/seedBuddha';
-import type { DatabaseState } from '../src/types/buddha';
-import { adminDb } from './firebaseAdmin';
+import { createInitialDatabase } from '../src/shared/seedBuddha.js';
+import type { DatabaseState } from '../src/types/buddha.js';
+import { adminDb } from './firebaseAdmin.js';
 
 /**
  * Persistência no Firestore.

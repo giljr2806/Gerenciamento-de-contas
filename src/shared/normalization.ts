@@ -1,4 +1,4 @@
-import { RegistryItem } from '../types/buddha';
+import { RegistryItem } from '../types/buddha.js';
 
 export const NON_SUPPLIER_DESCRIPTIONS = [
   'BOLO ANIVERSARIANTES',
