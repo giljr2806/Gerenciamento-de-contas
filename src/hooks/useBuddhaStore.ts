@@ -182,6 +182,12 @@ export function useBuddhaStore() {
         signal: controller.signal,
         headers: await authHeaders(),
       });
+      if (res.status === 401) {
+        // Sessão inválida/antiga: encerra e volta para a tela de login
+        setState(null);
+        await signOut(auth).catch(() => {});
+        return;
+      }
       if (!res.ok) {
         const data = await res.json().catch(() => ({}));
         throw new Error(
@@ -235,6 +241,11 @@ export function useBuddhaStore() {
       if (stopped || document.hidden) return;
       try {
         const res = await fetch('/api/state', { headers: await authHeaders() });
+        if (res.status === 401) {
+          setState(null);
+          await signOut(auth).catch(() => {});
+          return;
+        }
         if (!res.ok) throw new Error(String(res.status));
         const json = (await res.json()) as { state: DatabaseState };
         if (stopped) return;
