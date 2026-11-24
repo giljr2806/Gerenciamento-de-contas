@@ -12,3 +12,4 @@ data/
 .vercel
 .firebase
 bun.lock
+backups/

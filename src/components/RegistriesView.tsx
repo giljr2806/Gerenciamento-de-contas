@@ -313,6 +313,10 @@ export function RegistriesView({
     setImportError(null);
     setImportSuccess(null);
     setImportFileName(file.name);
+    if (file.size > 5 * 1024 * 1024) {
+      setImportError('Arquivo muito grande. O limite é 5 MB.');
+      return;
+    }
 
     try {
       const buffer = await file.arrayBuffer();

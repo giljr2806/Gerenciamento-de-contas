@@ -975,9 +975,9 @@ export function ContractsView({
                           placeholder="https://..."
                           className="flex-1 px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg text-slate-900 dark:text-slate-100"
                         />
-                        {fLinkDoc && (
+                        {/^https?:\/\//i.test(fLinkDoc.trim()) && (
                           <a
-                            href={fLinkDoc}
+                            href={fLinkDoc.trim()}
                             target="_blank"
                             rel="noopener noreferrer"
                             className="p-2 text-blue-700 dark:text-blue-400 border border-slate-200 dark:border-slate-700 rounded-lg hover:bg-slate-50 dark:hover:bg-slate-800"

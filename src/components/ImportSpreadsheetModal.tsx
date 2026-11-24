@@ -201,6 +201,11 @@ export function ImportSpreadsheetModal({
   const handleFileObject = async (file: File) => {
     setErrorMsg(null);
     setFileName(file.name);
+    // Limite de tamanho: reduz o risco de arquivos malformados/gigantes travarem o leitor de planilhas
+    if (file.size > 5 * 1024 * 1024) {
+      setErrorMsg('Arquivo muito grande. O limite é 5 MB.');
+      return;
+    }
     try {
       const buffer = await file.arrayBuffer();
       const wb = XLSX.read(buffer, { type: 'array', cellDates: false });
