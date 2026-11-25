@@ -77,7 +77,9 @@ export function PlanOvershootPanel({ state, year, tetos }: PlanOvershootPanelPro
         const diff = teto - real;
         const pct = teto > 0 ? (real / teto) * 100 : real > 0 ? 999 : 0;
         const over = real > 0 && real > teto;
-        return { cat, teto, real, diff, pct, over, semTeto: teto === 0 && real > 0 };
+        // Saldo em %: (Teto − Realizado) ÷ Teto. Negativo = estouro. Sem teto não há base.
+        const saldoPct = teto > 0 ? (diff / teto) * 100 : null;
+        return { cat, teto, real, diff, pct, saldoPct, over, semTeto: teto === 0 && real > 0 };
       })
       .filter((r) => r.teto > 0 || r.real !== 0)
       .sort((a, b) => b.real - a.real);
@@ -200,7 +202,11 @@ export function PlanOvershootPanel({ state, year, tetos }: PlanOvershootPanelPro
           },
           {
             label: monthTeto - monthReal < 0 ? 'Estouro do mês' : 'Folga do mês',
-            value: formatBRL(Math.abs(monthTeto - monthReal)),
+            value:
+              formatBRL(Math.abs(monthTeto - monthReal)) +
+              (monthTeto > 0
+                ? ` (${formatPercent(((monthTeto - monthReal) / monthTeto) * 100, 1, true)})`
+                : ''),
             tone: monthTeto - monthReal < 0 ? 'text-red-600 dark:text-red-400' : 'text-emerald-700 dark:text-emerald-400',
           },
           {
@@ -224,6 +230,10 @@ export function PlanOvershootPanel({ state, year, tetos }: PlanOvershootPanelPro
           <h3 className="font-display text-sm font-semibold text-slate-900 dark:text-slate-100">
             Top 10 categorias · {periodLabel}
           </h3>
+          <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-1">
+            <strong>% consumido</strong> = Realizado ÷ Teto (100% é o limite). <strong>Dif.</strong> = Teto − Realizado,
+            com o saldo em % = Dif ÷ Teto (negativo = estouro).
+          </p>
           <div className="overflow-x-auto mt-3">
             <table className="w-full text-xs text-left">
               <thead>
@@ -232,8 +242,8 @@ export function PlanOvershootPanel({ state, year, tetos }: PlanOvershootPanelPro
                   <th className="py-1.5 pr-2">Categoria</th>
                   <th className="py-1.5 px-2 text-right">Teto</th>
                   <th className="py-1.5 px-2 text-right">Realizado</th>
-                  <th className="py-1.5 px-2 text-right">Dif.</th>
-                  <th className="py-1.5 pl-2 text-right">%</th>
+                  <th className="py-1.5 px-2 text-right">Dif. (Teto − Real.)</th>
+                  <th className="py-1.5 pl-2 text-right min-w-[110px]">% consumido</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
@@ -249,15 +259,35 @@ export function PlanOvershootPanel({ state, year, tetos }: PlanOvershootPanelPro
                     <td className="py-1.5 px-2 text-right font-mono tabular-nums">{formatBRL(r.teto)}</td>
                     <td className="py-1.5 px-2 text-right font-mono tabular-nums font-semibold">{formatBRL(r.real)}</td>
                     <td
-                      className={`py-1.5 px-2 text-right font-mono tabular-nums ${
+                      className={`py-1.5 px-2 text-right font-mono tabular-nums whitespace-nowrap ${
                         r.over ? 'text-red-600 dark:text-red-400 font-semibold' : 'text-emerald-700 dark:text-emerald-400'
                       }`}
                     >
-                      {r.diff < 0 ? '-' : ''}
-                      {formatBRL(Math.abs(r.diff))}
+                      <div>{`${r.diff < 0 ? '-' : ''}${formatBRL(Math.abs(r.diff))}`}</div>
+                      <div className="text-[10px] font-normal">
+                        {r.saldoPct === null ? 'Sem teto' : `${formatPercent(r.saldoPct, 1, true)} do teto`}
+                      </div>
                     </td>
-                    <td className={`py-1.5 pl-2 text-right font-mono tabular-nums ${r.over ? 'text-red-600 dark:text-red-400' : ''}`}>
-                      {r.semTeto ? 'Sem teto' : formatPercent(r.pct)}
+                    <td className="py-1.5 pl-2 text-right font-mono tabular-nums whitespace-nowrap">
+                      {r.semTeto ? (
+                        <span className="text-red-600 dark:text-red-400">Sem teto</span>
+                      ) : (
+                        <>
+                          <div className={r.over ? 'text-red-600 dark:text-red-400 font-semibold' : ''}>
+                            {formatPercent(r.pct)}
+                          </div>
+                          <div
+                            className="mt-1 h-1.5 w-full rounded bg-slate-100 dark:bg-slate-800 overflow-hidden"
+                            role="img"
+                            aria-label={`${formatPercent(r.pct)} do teto consumido`}
+                          >
+                            <div
+                              className={`h-full ${r.over ? 'bg-red-600 dark:bg-red-500' : 'bg-blue-600 dark:bg-blue-500'}`}
+                              style={{ width: `${Math.min(100, Math.max(0, r.pct))}%` }}
+                            />
+                          </div>
+                        </>
+                      )}
                     </td>
                   </tr>
                 ))}
