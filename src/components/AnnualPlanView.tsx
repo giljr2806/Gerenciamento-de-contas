@@ -1,7 +1,8 @@
 import { Copy, FileInput, Lock, RotateCcw, Save } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { parseBRNumber } from '../shared/normalization';
-import { DatabaseState, tetoCategoryOf } from '../types/buddha';
+import { canonicalTetoCategory, DatabaseState, tetoCategoryOf } from '../types/buddha';
+import { PlanOvershootPanel } from './PlanOvershootPanel';
 import { formatBRL, formatDateTimeBR, MONTH_LABELS, sumArray } from '../utils/format';
 
 interface AnnualPlanViewProps {
@@ -14,20 +15,27 @@ interface AnnualPlanViewProps {
 function buildInitialTetos(state: DatabaseState, year: number): Record<string, number[]> {
   const existing = state.plans[String(year)]?.tetos || {};
   const result: Record<string, number[]> = {};
-  for (const cat of state.registries.categorias) {
-    result[cat.nome] = existing[cat.nome]
-      ? [...existing[cat.nome]]
-      : Array(12).fill(0);
-  }
-  for (const key of Object.keys(existing)) {
-    if (!result[key]) {
-      result[key] = [...existing[key]];
+  // Soma valores quando dois nomes viram a mesma categoria (ex.: nome antigo da Folha).
+  const put = (name: string, arr: number[]) => {
+    const key = canonicalTetoCategory(name);
+    if (!key) return;
+    const base = result[key] || Array(12).fill(0);
+    result[key] = base.map((v, i) => v + (arr[i] || 0));
+  };
+
+  const yearEntries = state.entries.filter((e) => e.competencia.startsWith(`${year}-`));
+  const usesCategoriaTeto = yearEntries.some((e) => e.categoriaTeto?.trim());
+
+  if (usesCategoriaTeto) {
+    // Grade só com categorias de teto: as dos lançamentos + as que já têm valor no plano salvo.
+    for (const e of yearEntries) put(tetoCategoryOf(e), Array(12).fill(0));
+    for (const [key, arr] of Object.entries(existing)) {
+      if (arr.some((v) => v > 0) || result[canonicalTetoCategory(key)]) put(key, arr);
     }
-  }
-  // "Categoria Teto" informada nos lançamentos do ano também vira linha da grade.
-  for (const e of state.entries) {
-    if (e.categoriaTeto && e.competencia.startsWith(`${year}-`) && !result[e.categoriaTeto]) {
-      result[e.categoriaTeto] = Array(12).fill(0);
+  } else {
+    for (const cat of state.registries.categorias) put(cat.nome, existing[cat.nome] || Array(12).fill(0));
+    for (const [key, arr] of Object.entries(existing)) {
+      if (!state.registries.categorias.some((c) => c.nome === key)) put(key, arr);
     }
   }
   return result;
@@ -492,6 +500,8 @@ export function AnnualPlanView({
           </table>
         </div>
       </div>
+
+      <PlanOvershootPanel state={state} year={activeYear} tetos={draftTetos} />
     </div>
   );
 }

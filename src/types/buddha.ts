@@ -185,7 +185,17 @@ export function isProposal(c: { tipo?: ContractKind }): boolean {
 
 /** Categoria pela qual o teto é controlado: "Categoria Teto" quando existir, senão a Categoria. */
 export function tetoCategoryOf(e: { categoria: string; categoriaTeto?: string }): string {
-  return e.categoriaTeto?.trim() || e.categoria;
+  return canonicalTetoCategory(e.categoriaTeto?.trim() || e.categoria);
+}
+
+/** Nomes antigos que devem contar como outra categoria de teto (evita duplicidade). */
+export const TETO_CATEGORY_ALIASES: Record<string, string> = {
+  'Folha, Encargos & Obrigações': 'Folha de Pagamento (CLT/PJ)',
+};
+
+export function canonicalTetoCategory(name: string): string {
+  const n = (name || '').trim();
+  return TETO_CATEGORY_ALIASES[n] ?? n;
 }
 
 export interface AnnualPlan extends AuditMeta {
