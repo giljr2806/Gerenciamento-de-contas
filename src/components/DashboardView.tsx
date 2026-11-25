@@ -2,7 +2,7 @@ import { AlertTriangle, Bell, BookOpen, ChevronRight } from 'lucide-react';
 import { useMemo, useState } from 'react';
 import buddhaDarkImg from '../assets/images/buddha_dark_clean_1795102387887.jpg';
 import buddhaLightImg from '../assets/images/buddha_light_clean_1795102387815.jpg';
-import { AlertItem, DatabaseState, isProposal } from '../types/buddha';
+import { AlertItem, DatabaseState, isProposal, tetoCategoryOf } from '../types/buddha';
 import { formatBRL, formatPercent, MONTH_FULL_LABELS, MONTH_LABELS, sumArray } from '../utils/format';
 import { getAvailableYears } from '../utils/years';
 import { KpiCardWithTooltip } from './KpiCardWithTooltip';
@@ -90,7 +90,13 @@ export function DashboardView({
       realizadoAcumulado.push(accR);
     }
 
-    const totalTeto = sumArray(tetoMensal);
+    // Teto geral do ano (se informado) vale como total; sem tetos por categoria, vira 1/12 por mês.
+    const somaCategorias = sumArray(tetoMensal);
+    const tetoGeral = plan?.tetoGeral && plan.tetoGeral > 0 ? plan.tetoGeral : 0;
+    if (tetoGeral > 0 && somaCategorias === 0) {
+      for (let m = 0; m < 12; m++) tetoMensal[m] = tetoGeral / 12;
+    }
+    const totalTeto = tetoGeral > 0 ? tetoGeral : somaCategorias;
     const totalPrevisto = sumArray(previstoMensal);
     const totalRealizado = sumArray(realizadoMensal);
     const saldoTeto = totalTeto - totalRealizado;
@@ -121,14 +127,14 @@ export function DashboardView({
   const categoryRows = useMemo(() => {
     const allCats = new Set<string>([
       ...state.registries.categorias.map((c) => c.nome),
-      ...filteredEntries.map((e) => e.categoria),
+      ...filteredEntries.map((e) => tetoCategoryOf(e)),
       ...(plan ? Object.keys(plan.tetos) : []),
     ]);
 
     return Array.from(allCats)
       .map((cat) => {
         const teto = plan?.tetos[cat] ? sumArray(plan.tetos[cat]) : 0;
-        const catEntries = filteredEntries.filter((e) => e.categoria === cat);
+        const catEntries = filteredEntries.filter((e) => tetoCategoryOf(e) === cat);
         const previsto = catEntries.reduce((s, e) => s + e.orcado, 0);
         const realizado = catEntries.reduce((s, e) => s + e.realizado, 0);
         const saldo = teto > 0 ? teto - realizado : previsto - realizado;
@@ -333,7 +339,7 @@ export function DashboardView({
           tooltip={{
             title: 'Teto Anual Planejado',
             description:
-              'Soma de todos os tetos mensais (Janeiro a Dezembro) cadastrados no menu Planejamento para o ano selecionado.',
+              'Teto geral do ano cadastrado no menu Planejamento; se não houver, soma dos tetos mensais por categoria (Janeiro a Dezembro).',
             formula: 'Σ Tetos Mensais de todas as categorias no ano',
             liveBreakdown: `Planejamento ${activeYear}: ${formatBRL(metrics.totalTeto)}`,
           }}

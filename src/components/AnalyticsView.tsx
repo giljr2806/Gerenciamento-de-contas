@@ -25,7 +25,7 @@ import {
 } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import * as XLSX from 'xlsx';
-import { DatabaseState, isProposal } from '../types/buddha';
+import { DatabaseState, isProposal, tetoCategoryOf } from '../types/buddha';
 import {
   formatBRL,
   formatCompetenciaBR,
@@ -107,6 +107,8 @@ export function AnalyticsView({
   const [empresaFilter, setEmpresaFilter] = useState<string>('all');
   const [deptoFilter, setDeptoFilter] = useState<string>('all');
   const [categoriaFilter, setCategoriaFilter] = useState<string>('all');
+  const [macroFilter, setMacroFilter] = useState<string>('all');
+  const [subFilter, setSubFilter] = useState<string>('all');
   const [naturezaFilter, setNaturezaFilter] = useState<'all' | 'recorrente' | 'pontual'>('all');
   const [includeCanceled, setIncludeCanceled] = useState<boolean>(false);
 
@@ -131,10 +133,14 @@ export function AnalyticsView({
     const depSet = new Set(state.registries.departamentos.map((d) => d.nome));
     const catSet = new Set(state.registries.categorias.map((c) => c.nome));
 
+    const macroSet = new Set<string>();
+    const subSet = new Set<string>();
     for (const e of state.entries) {
+      if (e.macroArea) macroSet.add(e.macroArea);
+      if (e.subarea) subSet.add(e.subarea);
       if (e.empresa) empSet.add(e.empresa);
       if (e.departamento) depSet.add(e.departamento);
-      if (e.categoria) catSet.add(e.categoria);
+      if (tetoCategoryOf(e)) catSet.add(tetoCategoryOf(e));
     }
 
     for (const c of state.contracts) {
@@ -153,6 +159,8 @@ export function AnalyticsView({
       empresas: Array.from(empSet).sort((a, b) => a.localeCompare(b, 'pt-BR')),
       departamentos: Array.from(depSet).sort((a, b) => a.localeCompare(b, 'pt-BR')),
       categorias: Array.from(catSet).sort((a, b) => a.localeCompare(b, 'pt-BR')),
+      macroAreas: Array.from(macroSet).sort((a, b) => a.localeCompare(b, 'pt-BR')),
+      subareas: Array.from(subSet).sort((a, b) => a.localeCompare(b, 'pt-BR')),
     };
   }, [state.registries, state.entries, state.contracts, state.plans]);
 
@@ -172,6 +180,8 @@ export function AnalyticsView({
 
       if (empresaFilter !== 'all' && e.empresa !== empresaFilter) return false;
       if (deptoFilter !== 'all' && e.departamento !== deptoFilter) return false;
+      if (macroFilter !== 'all' && (e.macroArea || '') !== macroFilter) return false;
+      if (subFilter !== 'all' && (e.subarea || '') !== subFilter) return false;
       if (naturezaFilter === 'recorrente' && !e.recorrente) return false;
       if (naturezaFilter === 'pontual' && e.recorrente) return false;
       return true;
@@ -184,14 +194,17 @@ export function AnalyticsView({
     endMonth,
     empresaFilter,
     deptoFilter,
+    macroFilter,
+    subFilter,
     naturezaFilter,
   ]);
 
   const categoryCounts = useMemo(() => {
     const counts = new Map<string, number>();
     for (const e of entriesBeforeCategory) {
-      if (!e.categoria) continue;
-      counts.set(e.categoria, (counts.get(e.categoria) || 0) + 1);
+      const tc = tetoCategoryOf(e);
+      if (!tc) continue;
+      counts.set(tc, (counts.get(tc) || 0) + 1);
     }
     return counts;
   }, [entriesBeforeCategory]);
@@ -212,7 +225,9 @@ export function AnalyticsView({
 
       if (empresaFilter !== 'all' && e.empresa !== empresaFilter) return false;
       if (deptoFilter !== 'all' && e.departamento !== deptoFilter) return false;
-      if (categoriaFilter !== 'all' && e.categoria !== categoriaFilter) return false;
+      if (macroFilter !== 'all' && (e.macroArea || '') !== macroFilter) return false;
+      if (subFilter !== 'all' && (e.subarea || '') !== subFilter) return false;
+      if (categoriaFilter !== 'all' && tetoCategoryOf(e) !== categoriaFilter) return false;
       if (naturezaFilter === 'recorrente' && !e.recorrente) return false;
       if (naturezaFilter === 'pontual' && e.recorrente) return false;
       return true;
@@ -225,6 +240,8 @@ export function AnalyticsView({
     endMonth,
     empresaFilter,
     deptoFilter,
+    macroFilter,
+    subFilter,
     categoriaFilter,
     naturezaFilter,
   ]);
@@ -354,7 +371,9 @@ export function AnalyticsView({
       if (!includeCanceled && e.status === 'Cancelado') continue;
       if (empresaFilter !== 'all' && e.empresa !== empresaFilter) continue;
       if (deptoFilter !== 'all' && e.departamento !== deptoFilter) continue;
-      if (categoriaFilter !== 'all' && e.categoria !== categoriaFilter) continue;
+      if (macroFilter !== 'all' && (e.macroArea || '') !== macroFilter) continue;
+      if (subFilter !== 'all' && (e.subarea || '') !== subFilter) continue;
+      if (categoriaFilter !== 'all' && tetoCategoryOf(e) !== categoriaFilter) continue;
       if (naturezaFilter === 'recorrente' && !e.recorrente) continue;
       if (naturezaFilter === 'pontual' && e.recorrente) continue;
       if (!e.competencia) continue;
@@ -395,6 +414,8 @@ export function AnalyticsView({
     includeCanceled,
     empresaFilter,
     deptoFilter,
+    macroFilter,
+    subFilter,
     categoriaFilter,
     naturezaFilter,
     metricBase,
@@ -418,7 +439,9 @@ export function AnalyticsView({
         }
         if (empresaFilter !== 'all' && e.empresa !== empresaFilter) continue;
         if (deptoFilter !== 'all' && e.departamento !== deptoFilter) continue;
-        if (categoriaFilter !== 'all' && e.categoria !== categoriaFilter) continue;
+        if (macroFilter !== 'all' && (e.macroArea || '') !== macroFilter) continue;
+        if (subFilter !== 'all' && (e.subarea || '') !== subFilter) continue;
+        if (categoriaFilter !== 'all' && tetoCategoryOf(e) !== categoriaFilter) continue;
         if (naturezaFilter === 'recorrente' && !e.recorrente) continue;
         if (naturezaFilter === 'pontual' && e.recorrente) continue;
 
@@ -488,6 +511,8 @@ export function AnalyticsView({
     yearScope,
     empresaFilter,
     deptoFilter,
+    macroFilter,
+    subFilter,
     categoriaFilter,
     naturezaFilter,
     startMonth,
@@ -526,7 +551,9 @@ export function AnalyticsView({
         if (!includeCanceled && e.status === 'Cancelado') continue;
         if (empresaFilter !== 'all' && e.empresa !== empresaFilter) continue;
         if (deptoFilter !== 'all' && e.departamento !== deptoFilter) continue;
-        if (categoriaFilter !== 'all' && e.categoria !== categoriaFilter) continue;
+        if (macroFilter !== 'all' && (e.macroArea || '') !== macroFilter) continue;
+        if (subFilter !== 'all' && (e.subarea || '') !== subFilter) continue;
+        if (categoriaFilter !== 'all' && tetoCategoryOf(e) !== categoriaFilter) continue;
         if (naturezaFilter === 'recorrente' && !e.recorrente) continue;
         if (naturezaFilter === 'pontual' && e.recorrente) continue;
 
@@ -575,6 +602,8 @@ export function AnalyticsView({
     includeCanceled,
     empresaFilter,
     deptoFilter,
+    macroFilter,
+    subFilter,
     categoriaFilter,
     naturezaFilter,
     metricBase,
@@ -604,7 +633,9 @@ export function AnalyticsView({
         if (e.competencia !== targetComp) continue;
         if (empresaFilter !== 'all' && e.empresa !== empresaFilter) continue;
         if (deptoFilter !== 'all' && e.departamento !== deptoFilter) continue;
-        if (categoriaFilter !== 'all' && e.categoria !== categoriaFilter) continue;
+        if (macroFilter !== 'all' && (e.macroArea || '') !== macroFilter) continue;
+        if (subFilter !== 'all' && (e.subarea || '') !== subFilter) continue;
+        if (categoriaFilter !== 'all' && tetoCategoryOf(e) !== categoriaFilter) continue;
         if (naturezaFilter === 'recorrente' && !e.recorrente) continue;
         if (naturezaFilter === 'pontual' && e.recorrente) continue;
 
@@ -657,6 +688,8 @@ export function AnalyticsView({
     includeCanceled,
     empresaFilter,
     deptoFilter,
+    macroFilter,
+    subFilter,
     categoriaFilter,
     naturezaFilter,
     startMonth,
@@ -804,12 +837,42 @@ export function AnalyticsView({
     };
   }, [filteredEntries, metricBase, state.registries.empresas, state.registries.departamentos]);
 
+  // Distribuição por Macro área e Subárea (campos opcionais dos lançamentos)
+  const areaBreakdowns = useMemo(() => {
+    const build = (pick: (e: (typeof filteredEntries)[number]) => string | undefined) => {
+      const map = new Map<string, { realizado: number; orcado: number; count: number }>();
+      for (const e of filteredEntries) {
+        const key = pick(e) || '(Não informado)';
+        const cur = map.get(key) || { realizado: 0, orcado: 0, count: 0 };
+        cur.realizado += e.realizado;
+        cur.orcado += e.orcado;
+        cur.count += 1;
+        map.set(key, cur);
+      }
+      const rows = Array.from(map.entries())
+        .map(([nome, d]) => ({
+          nome,
+          val: metricBase === 'realizado' ? d.realizado : d.orcado,
+          realizado: d.realizado,
+          orcado: d.orcado,
+          count: d.count,
+        }))
+        .sort((a, b) => b.val - a.val);
+      const total = rows.reduce((s, r) => s + r.val, 0);
+      return { rows, total };
+    };
+    return {
+      macro: build((e) => e.macroArea),
+      sub: build((e) => e.subarea),
+    };
+  }, [filteredEntries, metricBase]);
+
   // 7. CATEGORY PARTICIPATION BREAKDOWN
   const categoryBreakdown = useMemo(() => {
     const map = new Map<string, { realizado: number; orcado: number; count: number }>();
 
     for (const e of filteredEntries) {
-      const cat = e.categoria || '(Sem categoria)';
+      const cat = tetoCategoryOf(e) || '(Sem categoria)';
       const curr = map.get(cat) || { realizado: 0, orcado: 0, count: 0 };
       curr.realizado += e.realizado;
       curr.orcado += e.orcado;
@@ -923,6 +986,8 @@ export function AnalyticsView({
     state.contracts,
     empresaFilter,
     deptoFilter,
+    macroFilter,
+    subFilter,
     categoriaFilter,
     yearScope,
     activeYear,
@@ -969,6 +1034,8 @@ export function AnalyticsView({
     empresaFilter !== 'all' ||
     deptoFilter !== 'all' ||
     categoriaFilter !== 'all' ||
+    macroFilter !== 'all' ||
+    subFilter !== 'all' ||
     naturezaFilter !== 'all' ||
     includeCanceled;
 
@@ -978,6 +1045,8 @@ export function AnalyticsView({
     setEmpresaFilter('all');
     setDeptoFilter('all');
     setCategoriaFilter('all');
+    setMacroFilter('all');
+    setSubFilter('all');
     setNaturezaFilter('all');
     setIncludeCanceled(false);
     setSearchTable('');
@@ -1386,6 +1455,44 @@ export function AnalyticsView({
               {filterOptions.categorias.map((c) => (
                 <option key={c} value={c}>
                   {c}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div>
+            <label className="block text-[11px] font-medium text-slate-600 dark:text-slate-400 mb-1">
+              Macro área
+            </label>
+            <select
+              aria-label="Selecionar macro área"
+              value={macroFilter}
+              onChange={(e) => setMacroFilter(e.target.value)}
+              className="w-full px-2.5 py-1.5 text-xs bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg text-slate-800 dark:text-slate-100 truncate"
+            >
+              <option value="all">Todas as Macro áreas</option>
+              {filterOptions.macroAreas.map((m) => (
+                <option key={m} value={m}>
+                  {m}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div>
+            <label className="block text-[11px] font-medium text-slate-600 dark:text-slate-400 mb-1">
+              Subárea
+            </label>
+            <select
+              aria-label="Selecionar subárea"
+              value={subFilter}
+              onChange={(e) => setSubFilter(e.target.value)}
+              className="w-full px-2.5 py-1.5 text-xs bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg text-slate-800 dark:text-slate-100 truncate"
+            >
+              <option value="all">Todas as Subáreas</option>
+              {filterOptions.subareas.map((s) => (
+                <option key={s} value={s}>
+                  {s}
                 </option>
               ))}
             </select>
@@ -2686,6 +2793,52 @@ export function AnalyticsView({
                 </tfoot>
               </table>
             </div>
+          </div>
+
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            {(
+              [
+                { title: 'Macro área', data: areaBreakdowns.macro },
+                { title: 'Subárea (DHO, R&S, DP...)', data: areaBreakdowns.sub },
+              ] as const
+            ).map(({ title, data }) => (
+              <div
+                key={title}
+                className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-5 space-y-3"
+              >
+                <h3 className="font-display text-base font-semibold text-slate-900 dark:text-slate-100">
+                  Distribuição por {title} ({metricBase === 'realizado' ? 'Realizado' : 'Orçado'})
+                </h3>
+                {data.rows.length === 0 || data.total === 0 ? (
+                  <p className="text-xs text-slate-400">Sem valores no filtro atual.</p>
+                ) : (
+                  <ul className="space-y-2.5">
+                    {data.rows.map((r) => {
+                      const pct = data.total > 0 ? (r.val / data.total) * 100 : 0;
+                      return (
+                        <li key={r.nome} className="text-xs">
+                          <div className="flex items-baseline justify-between gap-3">
+                            <span className="font-medium text-slate-800 dark:text-slate-200 truncate">
+                              {r.nome}
+                            </span>
+                            <span className="font-mono tabular-nums text-slate-700 dark:text-slate-300 whitespace-nowrap">
+                              {formatBRL(r.val)} · {formatPercent(pct)}
+                            </span>
+                          </div>
+                          <div className="mt-1 h-2 rounded bg-slate-100 dark:bg-slate-800 overflow-hidden">
+                            <div
+                              className="h-full bg-blue-600 dark:bg-blue-500"
+                              style={{ width: `${Math.min(100, Math.max(0, pct))}%` }}
+                            />
+                          </div>
+                          <div className="text-[10px] text-slate-500 mt-0.5">{r.count} lançamento(s)</div>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                )}
+              </div>
+            ))}
           </div>
         </div>
       )}

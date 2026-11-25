@@ -467,8 +467,8 @@ export function useBuddhaStore() {
 
   // Annual Plan API
   const saveAnnualPlan = useCallback(
-    (year: number, tetos: Record<string, number[]>) =>
-      apiRequest<void>(`/api/plans/${year}`, 'PUT', { tetos }),
+    (year: number, tetos: Record<string, number[]>, tetoGeral: number) =>
+      apiRequest<void>(`/api/plans/${year}`, 'PUT', { tetos, tetoGeral }),
     [apiRequest]
   );
 

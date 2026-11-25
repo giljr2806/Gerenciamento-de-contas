@@ -1,4 +1,4 @@
-import { AlertItem, DatabaseState, isProposal } from '../types/buddha';
+import { AlertItem, DatabaseState, isProposal, tetoCategoryOf } from '../types/buddha';
 import {
   daysUntil,
   daysUntilDataBase,
@@ -133,7 +133,8 @@ export function computeSystemAlerts(
   const plan = state.plans[String(activeYear)];
   const actualByCat = new Map<string, number>();
   for (const e of filteredEntries) {
-    actualByCat.set(e.categoria, (actualByCat.get(e.categoria) || 0) + e.realizado);
+    const tc = tetoCategoryOf(e);
+    actualByCat.set(tc, (actualByCat.get(tc) || 0) + e.realizado);
   }
 
   const allCategories = new Set<string>([

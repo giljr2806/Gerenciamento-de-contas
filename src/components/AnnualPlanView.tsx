@@ -1,14 +1,14 @@
 import { Copy, FileInput, Lock, RotateCcw, Save } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { parseBRNumber } from '../shared/normalization';
-import { DatabaseState } from '../types/buddha';
+import { DatabaseState, tetoCategoryOf } from '../types/buddha';
 import { formatBRL, formatDateTimeBR, MONTH_LABELS, sumArray } from '../utils/format';
 
 interface AnnualPlanViewProps {
   state: DatabaseState;
   activeYear: number;
   isAdmin: boolean;
-  onSavePlan: (year: number, tetos: Record<string, number[]>) => Promise<unknown>;
+  onSavePlan: (year: number, tetos: Record<string, number[]>, tetoGeral: number) => Promise<unknown>;
 }
 
 function buildInitialTetos(state: DatabaseState, year: number): Record<string, number[]> {
@@ -24,6 +24,12 @@ function buildInitialTetos(state: DatabaseState, year: number): Record<string, n
       result[key] = [...existing[key]];
     }
   }
+  // "Categoria Teto" informada nos lançamentos do ano também vira linha da grade.
+  for (const e of state.entries) {
+    if (e.categoriaTeto && e.competencia.startsWith(`${year}-`) && !result[e.categoriaTeto]) {
+      result[e.categoriaTeto] = Array(12).fill(0);
+    }
+  }
   return result;
 }
 
@@ -36,6 +42,9 @@ export function AnnualPlanView({
   const [draftTetos, setDraftTetos] = useState<Record<string, number[]>>(() =>
     buildInitialTetos(state, activeYear)
   );
+  const [draftGeral, setDraftGeral] = useState<number>(
+    () => state.plans[String(activeYear)]?.tetoGeral || 0
+  );
   const [dirty, setDirty] = useState(false);
   const [saving, setSaving] = useState(false);
   const [feedback, setFeedback] = useState<string | null>(null);
@@ -46,6 +55,7 @@ export function AnnualPlanView({
   useEffect(() => {
     if (!dirty) {
       setDraftTetos(buildInitialTetos(state, activeYear));
+      setDraftGeral(state.plans[String(activeYear)]?.tetoGeral || 0);
     }
   }, [state, activeYear, dirty]);
 
@@ -53,6 +63,7 @@ export function AnnualPlanView({
     setDirty(false);
     setFeedback(null);
     setDraftTetos(buildInitialTetos(state, activeYear));
+    setDraftGeral(state.plans[String(activeYear)]?.tetoGeral || 0);
   }, [activeYear]);
 
   // Realizado by category & month (excluding Cancelado)
@@ -65,8 +76,9 @@ export function AnnualPlanView({
       if (!e.competencia.startsWith(`${activeYear}-`) || e.status === 'Cancelado') continue;
       const mIdx = parseInt(e.competencia.slice(5, 7), 10) - 1;
       if (mIdx < 0 || mIdx > 11) continue;
-      if (!map[e.categoria]) map[e.categoria] = Array(12).fill(0);
-      map[e.categoria][mIdx] += e.realizado;
+      const tc = tetoCategoryOf(e);
+      if (!map[tc]) map[tc] = Array(12).fill(0);
+      map[tc][mIdx] += e.realizado;
     }
     return map;
   }, [state.entries, activeYear, draftTetos]);
@@ -146,8 +158,9 @@ export function AnnualPlanView({
       if (!e.competencia.startsWith(`${activeYear}-`) || e.status === 'Cancelado') continue;
       const mIdx = parseInt(e.competencia.slice(5, 7), 10) - 1;
       if (mIdx < 0 || mIdx > 11) continue;
-      if (!next[e.categoria]) next[e.categoria] = Array(12).fill(0);
-      next[e.categoria][mIdx] += e.orcado;
+      const tc = tetoCategoryOf(e);
+      if (!next[tc]) next[tc] = Array(12).fill(0);
+      next[tc][mIdx] += e.orcado;
     }
     setDraftTetos(next);
     setDirty(true);
@@ -161,7 +174,7 @@ export function AnnualPlanView({
     setSaving(true);
     setFeedback(null);
     try {
-      await onSavePlan(activeYear, draftTetos);
+      await onSavePlan(activeYear, draftTetos, draftGeral);
       setDirty(false);
       setFeedback(`Planejamento anual de ${activeYear} salvo e sincronizado.`);
     } catch (err) {
@@ -173,6 +186,7 @@ export function AnnualPlanView({
 
   const handleDiscard = () => {
     setDraftTetos(buildInitialTetos(state, activeYear));
+    setDraftGeral(state.plans[String(activeYear)]?.tetoGeral || 0);
     setDirty(false);
     setFeedback('Alterações descartadas.');
   };
@@ -275,6 +289,72 @@ export function AnnualPlanView({
             {formatDateTimeBR(planMeta.atualizadoEm)}
           </div>
         )}
+      </div>
+
+      {/* Teto geral do ano */}
+      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-4">
+        <div className="flex flex-wrap items-end gap-4">
+          <div className="min-w-[220px]">
+            <label
+              htmlFor="teto-geral"
+              className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1"
+            >
+              Teto geral do ano · {activeYear} (R$)
+            </label>
+            <input
+              id="teto-geral"
+              type="number"
+              min={0}
+              step="1000"
+              disabled={!isAdmin}
+              value={draftGeral}
+              onChange={(e) => {
+                setDraftGeral(Math.max(0, parseBRNumber(e.target.value)));
+                setDirty(true);
+                setFeedback(null);
+              }}
+              className="w-full px-3 py-2 text-right font-mono text-sm font-semibold bg-white dark:bg-slate-900 border border-blue-200 dark:border-blue-900 rounded-lg text-slate-900 dark:text-slate-100 tabular-nums disabled:opacity-75 focus:outline-none focus:ring-2 focus:ring-blue-600"
+            />
+          </div>
+          <div className="text-xs text-slate-600 dark:text-slate-400 space-y-0.5">
+            <div>
+              Soma dos tetos por categoria:{' '}
+              <strong className="font-mono text-slate-900 dark:text-slate-100">
+                {formatBRL(columnTotals.grandTeto)}
+              </strong>
+            </div>
+            <div>
+              Realizado no ano:{' '}
+              <strong className="font-mono text-slate-900 dark:text-slate-100">
+                {formatBRL(columnTotals.grandReal)}
+              </strong>
+              {draftGeral > 0 && (
+                <>
+                  {' · '}
+                  <span
+                    className={
+                      columnTotals.grandReal > draftGeral
+                        ? 'text-red-600 dark:text-red-400 font-semibold'
+                        : ''
+                    }
+                  >
+                    {((columnTotals.grandReal / draftGeral) * 100).toFixed(1).replace('.', ',')}% do teto geral
+                  </span>
+                </>
+              )}
+            </div>
+            {draftGeral > 0 && columnTotals.grandTeto > draftGeral && (
+              <div className="text-amber-700 dark:text-amber-400">
+                Atenção: a soma dos tetos por categoria excede o teto geral.
+              </div>
+            )}
+          </div>
+        </div>
+        <p className="mt-2 text-[11px] text-slate-500 dark:text-slate-400">
+          O teto geral é opcional e independe das categorias. Quando informado, ele é o "Teto Anual Planejado" do
+          Painel. Os tetos por categoria ficam na grade abaixo (digite o valor anual na última coluna e ele é dividido
+          por 12, ou ajuste mês a mês).
+        </p>
       </div>
 
       {/* 12-Month Matrix Grid */}
