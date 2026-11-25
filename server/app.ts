@@ -480,6 +480,9 @@ function sanitizeEntryBody(raw: unknown): Partial<Entry> {
   if (r.realizado !== undefined) out.realizado = cleanNum(r.realizado);
   if (ENTRY_STATUSES.includes(r.status as EntryStatus)) out.status = r.status as EntryStatus;
   if (r.contratoId !== undefined) out.contratoId = cleanStr(r.contratoId, 100) || undefined;
+  for (const k of ['linhaOpex', 'subarea', 'macroArea', 'categoriaTeto'] as const) {
+    if (r[k] !== undefined) out[k] = cleanStr(r[k], 200);
+  }
   return out;
 }
 
@@ -1093,6 +1096,10 @@ export function createApp() {
       saldo: Math.round((orcado - realizado) * 100) / 100,
       status: body.status || 'Previsto',
       contratoId: body.contratoId || undefined,
+      ...(body.linhaOpex ? { linhaOpex: body.linhaOpex } : {}),
+      ...(body.subarea ? { subarea: body.subarea } : {}),
+      ...(body.macroArea ? { macroArea: body.macroArea } : {}),
+      ...(body.categoriaTeto ? { categoriaTeto: body.categoriaTeto } : {}),
       obs: String(body.obs || '').trim(),
       criadoPor: ctx.name,
       criadoEm: now,
@@ -1294,6 +1301,10 @@ export function createApp() {
         saldo: Math.round((orcado - realizado) * 100) / 100,
         status: item.status || (realizado !== 0 ? 'Pago' : 'Previsto'),
         contratoId: item.contratoId || undefined,
+        ...(item.linhaOpex ? { linhaOpex: item.linhaOpex } : {}),
+        ...(item.subarea ? { subarea: item.subarea } : {}),
+        ...(item.macroArea ? { macroArea: item.macroArea } : {}),
+        ...(item.categoriaTeto ? { categoriaTeto: item.categoriaTeto } : {}),
         obs: item.obs || '',
         criadoPor: ctx.name,
         criadoEm: now,
@@ -1589,10 +1600,14 @@ export function createApp() {
       return;
     }
 
+    const rawGeral = (req.body as { tetoGeral?: unknown })?.tetoGeral;
     const existing = db.plans[String(yearNum)];
+    // Se o cliente não enviar tetoGeral, preserva o valor atual.
+    const tetoGeral = rawGeral === undefined ? existing?.tetoGeral ?? 0 : cleanNum(rawGeral, 0);
     const plan: AnnualPlan = {
       year: yearNum,
       tetos,
+      tetoGeral,
       criadoPor: existing?.criadoPor || ctx.name,
       criadoEm: existing?.criadoEm || now,
       atualizadoPor: ctx.name,

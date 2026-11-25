@@ -1,6 +1,6 @@
 import { CheckCircle2, ClipboardCopy, FileDown, FileSpreadsheet } from 'lucide-react';
 import { useMemo, useState } from 'react';
-import { DatabaseState, isProposal } from '../types/buddha';
+import { DatabaseState, isProposal, tetoCategoryOf } from '../types/buddha';
 import {
   copyReportCsvToClipboard,
   exportReportLandscapePdf,
@@ -95,7 +95,7 @@ export function ReportsView({ state, activeYear, onChangeYear }: ReportsViewProp
 
     for (const e of filteredEntries) {
       let key = '';
-      if (groupBy === 'categoria') key = e.categoria;
+      if (groupBy === 'categoria') key = tetoCategoryOf(e);
       else if (groupBy === 'fornecedor') key = e.fornecedor || '(Sem fornecedor)';
       else if (groupBy === 'empresa') key = e.empresa;
       else if (groupBy === 'departamento') key = e.departamento;

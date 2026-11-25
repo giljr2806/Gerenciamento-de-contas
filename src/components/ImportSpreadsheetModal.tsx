@@ -45,9 +45,18 @@ interface ColumnMapping {
   departamento: string;
   orcado: string;
   realizado: string;
+  status: string;
+  linhaOpex: string;
+  subarea: string;
+  macroArea: string;
+  categoriaTeto: string;
 }
 
 interface PreviewRow {
+  linhaOpex: string;
+  subarea: string;
+  macroArea: string;
+  categoriaTeto: string;
   rowIndex: number;
   selected: boolean;
   isDuplicate: boolean;
@@ -81,32 +90,84 @@ const DEFAULT_SUPPLIER_HINTS: Record<string, string> = {
   'praxis business conteudos': 'PRAXIS BUSINESS',
 };
 
-function findColumnKey(headers: string[], aliases: string[]): string {
+/**
+ * Procura a coluna pelos apelidos, em ordem de prioridade: primeiro nome exato, depois
+ * nome que contém o apelido. Colunas já usadas por outro campo são ignoradas.
+ */
+function findColumnKey(headers: string[], aliases: string[], used: Set<string>): string {
   const norm = (s: string) => stripAccents(s).toLowerCase().replace(/[^a-z0-9]/g, '');
-  const map = new Map(headers.map((h) => [norm(h), h]));
+  const entries = headers.map((h) => [norm(h), h] as const).filter(([, h]) => !used.has(h));
   for (const a of aliases) {
-    const exact = map.get(a);
-    if (exact) return exact;
+    const exact = entries.find(([k]) => k === a);
+    if (exact) {
+      used.add(exact[1]);
+      return exact[1];
+    }
   }
-  for (const [k, orig] of map.entries()) {
-    if (aliases.some((a) => k.includes(a))) return orig;
+  for (const a of aliases) {
+    const partial = entries.find(([k]) => k.includes(a));
+    if (partial) {
+      used.add(partial[1]);
+      return partial[1];
+    }
   }
   return '';
 }
 
 function buildAutoMapping(headers: string[]): ColumnMapping {
+  const used = new Set<string>();
+  // Campos mais específicos primeiro, para não "roubarem" colunas de nomes parecidos
+  // (ex.: "Categoria Teto" vs "Categoria", "Macro área" vs "área").
+  const categoriaTeto = findColumnKey(headers, ['categoriateto', 'categteto', 'tetocategoria'], used);
+  const macroArea = findColumnKey(headers, ['macroarea', 'macro'], used);
+  const linhaOpex = findColumnKey(headers, ['linhaopex', 'opex'], used);
+  const dataPagamento = findColumnKey(
+    headers,
+    ['datadepagamento', 'datapagamento', 'datapgto', 'pagamento', 'vencimento'],
+    used
+  );
+  const data = findColumnKey(headers, ['competencia', 'mesano', 'data', 'mes'], used);
+  const categoria = findColumnKey(headers, ['categoria', 'cat'], used);
+  const descricao = findColumnKey(headers, ['descricao', 'desc', 'historico', 'item'], used);
+  const fornecedor = findColumnKey(headers, ['fornecedor', 'parceiro'], used);
+  const recorrente = findColumnKey(headers, ['recorrente', 'recorrencia'], used);
+  const empresa = findColumnKey(headers, ['empresa', 'unidade', 'cnpj'], used);
+  // 1ª coluna "Departamento" = departamento; a 2ª (Departamento_1, etc.) = subárea.
+  const departamento = findColumnKey(headers, ['departamento', 'depto', 'setor'], used);
+  const subarea = findColumnKey(
+    headers,
+    ['subarea', 'departamento1', 'departamento2', 'depto1', 'depto2', 'area'],
+    used
+  );
+  const orcado = findColumnKey(headers, ['orcado', 'previsto', 'budget'], used);
+  const realizado = findColumnKey(headers, ['realizado', 'pago', 'valor'], used);
+  const status = findColumnKey(headers, ['status', 'situacao'], used);
   return {
-    data: findColumnKey(headers, ['data', 'competencia', 'mesano', 'mes']),
-    categoria: findColumnKey(headers, ['categoria', 'cat']),
-    descricao: findColumnKey(headers, ['descricao', 'desc', 'historico', 'item']),
-    fornecedor: findColumnKey(headers, ['fornecedor', 'parceiro']),
-    dataPagamento: findColumnKey(headers, ['datapagamento', 'datapgto', 'pagamento', 'vencimento']),
-    recorrente: findColumnKey(headers, ['recorrente', 'recorrencia']),
-    empresa: findColumnKey(headers, ['empresa', 'unidade', 'cnpj']),
-    departamento: findColumnKey(headers, ['departamento', 'depto', 'area', 'setor']),
-    orcado: findColumnKey(headers, ['orcado', 'previsto', 'budget']),
-    realizado: findColumnKey(headers, ['realizado', 'pago', 'valor']),
+    data,
+    categoria,
+    descricao,
+    fornecedor,
+    dataPagamento,
+    recorrente,
+    empresa,
+    departamento,
+    orcado,
+    realizado,
+    status,
+    linhaOpex,
+    subarea,
+    macroArea,
+    categoriaTeto,
   };
+}
+
+function parseStatusCell(raw: unknown): EntryStatus | '' {
+  const s = stripAccents(String(raw ?? '')).toLowerCase().trim();
+  if (s === 'pago' || s === 'paga') return 'Pago';
+  if (s === 'previsto' || s === 'prevista' || s === 'pendente') return 'Previsto';
+  if (s === 'aprovado' || s === 'aprovada') return 'Aprovado';
+  if (s === 'cancelado' || s === 'cancelada') return 'Cancelado';
+  return '';
 }
 
 export function ImportSpreadsheetModal({
@@ -137,6 +198,11 @@ export function ImportSpreadsheetModal({
     departamento: '',
     orcado: '',
     realizado: '',
+    status: '',
+    linhaOpex: '',
+    subarea: '',
+    macroArea: '',
+    categoriaTeto: '',
   });
   const [showColumnConfig, setShowColumnConfig] = useState(false);
 
@@ -190,6 +256,21 @@ export function ImportSpreadsheetModal({
       return;
     }
     const cols = Object.keys(jsonRows[0]);
+
+    // Competência digitada como "jan-26" pode virar data (26/jan) no Excel. Quando a célula é
+    // um número formatado como "mmm-aa" (texto exibido = mês-ano), usa o texto exibido.
+    const compCol = buildAutoMapping(cols).data;
+    const ref = ws['!ref'] ? XLSX.utils.decode_range(ws['!ref']) : null;
+    if (compCol && ref) {
+      const colIdx = ref.s.c + cols.indexOf(compCol);
+      jsonRows.forEach((row, i) => {
+        const cell = ws[XLSX.utils.encode_cell({ r: ref.s.r + 1 + i, c: colIdx })];
+        const shown = typeof cell?.w === 'string' ? cell.w.trim() : '';
+        if (cell?.t === 'n' && /^[A-Za-zÀ-ÿ]{3,9}[-/ ]\d{2,4}$/.test(shown)) {
+          row[compCol] = shown;
+        }
+      });
+    }
     setHeaders(cols);
     setRawRows(jsonRows);
     setMapping(buildAutoMapping(cols));
@@ -293,8 +374,32 @@ export function ImportSpreadsheetModal({
         Saldo: -914,
       },
     ];
+    const extras = [
+      { macro: 'DESPESAS ADMINISTRATIVAS', teto: 'Outros', sub: 'DHO' },
+      { macro: 'DESPESAS ADMINISTRATIVAS', teto: 'Treinamento & Desenvolvimento', sub: 'DHO' },
+      { macro: 'DESPESAS ADMINISTRATIVAS', teto: 'Outros', sub: 'R&S' },
+      { macro: 'PESSOAL', teto: 'Cultura, Clima & Eventos', sub: 'G&G Geral' },
+    ];
+    const extended = sampleRows.map((r, i) => ({
+      'Competência': r.Data.slice(3).replace(/^(\d{2})\/(\d{4})$/, '$2-$1'),
+      Categoria: r.Categoria,
+      'Linha Opex': r.Descrição,
+      Descrição: r.Descrição,
+      Fornecedor: r.Fornecedor,
+      Empresa: r.Empresa,
+      Departamento: r.Departamento,
+      Recorrente: r.Recorrente,
+      Orçado: r.Orçado,
+      Realizado: r.Realizado,
+      Saldo: r.Saldo,
+      'Data de Pagamento': r['Data de Pagamento'],
+      Status: r.Realizado !== 0 ? 'Pago' : 'Previsto',
+      'Subárea': extras[i].sub,
+      'Macro área': extras[i].macro,
+      'Categoria Teto': extras[i].teto,
+    }));
     const wb = XLSX.utils.book_new();
-    const ws = XLSX.utils.json_to_sheet(sampleRows);
+    const ws = XLSX.utils.json_to_sheet(extended);
     XLSX.utils.book_append_sheet(wb, ws, 'Lancamentos');
     XLSX.writeFile(wb, 'modelo_lancamentos_buddha_spa.xlsx');
   };
@@ -426,10 +531,20 @@ export function ImportSpreadsheetModal({
       const selected =
         selectionOverrides[rowIndex] !== undefined ? selectionOverrides[rowIndex] : defaultSelected;
 
+      const cellStatus = mapping.status ? parseStatusCell(rawRow[mapping.status]) : '';
       const computedStatus: EntryStatus =
-        statusMode === 'auto' ? (realizado !== 0 ? 'Pago' : 'Previsto') : statusMode;
+        statusMode === 'auto'
+          ? cellStatus || (realizado !== 0 ? 'Pago' : 'Previsto')
+          : statusMode;
+
+      const txt = (col: string) =>
+        col ? String(rawRow[col] ?? '').replace(/\s+/g, ' ').trim().slice(0, 200) : '';
 
       rows.push({
+        linhaOpex: txt(mapping.linhaOpex),
+        subarea: txt(mapping.subarea),
+        macroArea: txt(mapping.macroArea),
+        categoriaTeto: txt(mapping.categoriaTeto),
         rowIndex,
         selected,
         isDuplicate,
@@ -521,6 +636,10 @@ export function ImportSpreadsheetModal({
         realizado: r.realizado,
         saldo: r.saldo,
         status: r.status,
+        ...(r.linhaOpex ? { linhaOpex: r.linhaOpex } : {}),
+        ...(r.subarea ? { subarea: r.subarea } : {}),
+        ...(r.macroArea ? { macroArea: r.macroArea } : {}),
+        ...(r.categoriaTeto ? { categoriaTeto: r.categoriaTeto } : {}),
         obs: `Importado de ${fileName} (${selectedSheet})`,
       }));
 
@@ -796,6 +915,11 @@ export function ImportSpreadsheetModal({
                         { key: 'departamento', label: 'Coluna Departamento' },
                         { key: 'orcado', label: 'Coluna Orçado' },
                         { key: 'realizado', label: 'Coluna Realizado' },
+                        { key: 'status', label: 'Coluna Status' },
+                        { key: 'linhaOpex', label: 'Coluna Linha Opex' },
+                        { key: 'subarea', label: 'Coluna Subárea (DHO, R&S…)' },
+                        { key: 'macroArea', label: 'Coluna Macro área' },
+                        { key: 'categoriaTeto', label: 'Coluna Categoria Teto' },
                       ] as Array<{ key: keyof ColumnMapping; label: string }>
                     ).map((col) => (
                       <div key={col.key}>

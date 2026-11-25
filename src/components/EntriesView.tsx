@@ -76,6 +76,8 @@ export function EntriesView({
   const [catFilter, setCatFilter] = useState('all');
   const [empFilter, setEmpFilter] = useState('all');
   const [depFilter, setDepFilter] = useState('all');
+  const [macroFilter, setMacroFilter] = useState('all');
+  const [subFilter, setSubFilter] = useState('all');
   const [supFilter, setSupFilter] = useState('all');
   const [statusFilter, setStatusFilter] = useState('all');
   const [contractFilter, setContractFilter] = useState('all');
@@ -119,6 +121,10 @@ export function EntriesView({
   const [formStatus, setFormStatus] = useState<EntryStatus>('Previsto');
   const [formContratoId, setFormContratoId] = useState('');
   const [formObs, setFormObs] = useState('');
+  const [formLinhaOpex, setFormLinhaOpex] = useState('');
+  const [formSubarea, setFormSubarea] = useState('');
+  const [formMacroArea, setFormMacroArea] = useState('');
+  const [formCatTeto, setFormCatTeto] = useState('');
   const [formError, setFormError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
 
@@ -142,6 +148,21 @@ export function EntriesView({
     [state.contracts]
   );
 
+  const macroOptions = useMemo(
+    () =>
+      Array.from(new Set(state.entries.map((e) => e.macroArea).filter((v): v is string => !!v))).sort(
+        (a, b) => a.localeCompare(b, 'pt-BR')
+      ),
+    [state.entries]
+  );
+  const subOptions = useMemo(
+    () =>
+      Array.from(new Set(state.entries.map((e) => e.subarea).filter((v): v is string => !!v))).sort(
+        (a, b) => a.localeCompare(b, 'pt-BR')
+      ),
+    [state.entries]
+  );
+
   const openNewDrawer = (prefill?: Entry) => {
     setFormError(null);
     if (prefill) {
@@ -159,6 +180,10 @@ export function EntriesView({
       setFormStatus('Previsto');
       setFormContratoId(prefill.contratoId || '');
       setFormObs(prefill.obs);
+      setFormLinhaOpex(prefill.linhaOpex || '');
+      setFormSubarea(prefill.subarea || '');
+      setFormMacroArea(prefill.macroArea || '');
+      setFormCatTeto(prefill.categoriaTeto || '');
     } else {
       setEditingEntry(null);
       setFormComp(`${activeYear}-11`);
@@ -174,6 +199,10 @@ export function EntriesView({
       setFormStatus('Previsto');
       setFormContratoId('');
       setFormObs('');
+      setFormLinhaOpex('');
+      setFormSubarea('');
+      setFormMacroArea('');
+      setFormCatTeto('');
     }
     setDrawerOpen(true);
   };
@@ -199,6 +228,10 @@ export function EntriesView({
     setFormStatus(entry.status);
     setFormContratoId(entry.contratoId || '');
     setFormObs(entry.obs || '');
+    setFormLinhaOpex(entry.linhaOpex || '');
+    setFormSubarea(entry.subarea || '');
+    setFormMacroArea(entry.macroArea || '');
+    setFormCatTeto(entry.categoriaTeto || '');
     setDrawerOpen(true);
   };
 
@@ -235,6 +268,8 @@ export function EntriesView({
       if (catFilter !== 'all' && e.categoria !== catFilter) return false;
       if (empFilter !== 'all' && e.empresa !== empFilter) return false;
       if (depFilter !== 'all' && e.departamento !== depFilter) return false;
+      if (macroFilter !== 'all' && (e.macroArea || '') !== macroFilter) return false;
+      if (subFilter !== 'all' && (e.subarea || '') !== subFilter) return false;
       if (supFilter !== 'all' && e.fornecedor !== supFilter) return false;
       if (statusFilter !== 'all' && e.status !== statusFilter) return false;
       if (contractFilter !== 'all' && e.contratoId !== contractFilter) return false;
@@ -256,6 +291,10 @@ export function EntriesView({
           e.fornecedor.toLowerCase().includes(q) ||
           e.categoria.toLowerCase().includes(q) ||
           e.empresa.toLowerCase().includes(q) ||
+          (e.linhaOpex || '').toLowerCase().includes(q) ||
+          (e.macroArea || '').toLowerCase().includes(q) ||
+          (e.categoriaTeto || '').toLowerCase().includes(q) ||
+          (e.subarea || '').toLowerCase().includes(q) ||
           e.obs.toLowerCase().includes(q)
         );
       }
@@ -278,6 +317,8 @@ export function EntriesView({
     catFilter,
     empFilter,
     depFilter,
+    macroFilter,
+    subFilter,
     supFilter,
     statusFilter,
     contractFilter,
@@ -351,6 +392,10 @@ export function EntriesView({
         realizado: parseBRNumber(formRealizado),
         status: formStatus,
         contratoId: formContratoId || undefined,
+        linhaOpex: formLinhaOpex.trim(),
+        subarea: formSubarea.trim(),
+        macroArea: formMacroArea.trim(),
+        categoriaTeto: formCatTeto.trim(),
         obs: formObs.trim(),
       };
 
@@ -553,6 +598,33 @@ export function EntriesView({
               ))}
             </select>
           </div>
+          {(
+            [
+              { label: 'Macro área', value: macroFilter, set: setMacroFilter, opts: macroOptions },
+              { label: 'Subárea', value: subFilter, set: setSubFilter, opts: subOptions },
+            ] as const
+          ).map((f) => (
+            <div key={f.label}>
+              <label className="block text-[10px] text-slate-500 dark:text-slate-400 mb-0.5">
+                {f.label}
+              </label>
+              <select
+                value={f.value}
+                onChange={(e) => {
+                  f.set(e.target.value);
+                  setPage(1);
+                }}
+                className="w-full px-2 py-1.5 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg text-slate-800 dark:text-slate-100"
+              >
+                <option value="all">Todas</option>
+                {f.opts.map((o) => (
+                  <option key={o} value={o}>
+                    {o}
+                  </option>
+                ))}
+              </select>
+            </div>
+          ))}
           <div>
             <label className="block text-[10px] text-slate-500 dark:text-slate-400 mb-0.5">
               Departamento
@@ -667,6 +739,8 @@ export function EntriesView({
               setCatFilter('all');
               setEmpFilter('all');
               setDepFilter('all');
+              setMacroFilter('all');
+              setSubFilter('all');
               setSupFilter('all');
               setStatusFilter('all');
               setContractFilter('all');
@@ -780,6 +854,10 @@ export function EntriesView({
                       </div>
                       <div className="text-[11px] text-slate-500 dark:text-slate-400 truncate">
                         {entry.categoria}
+                        {entry.categoriaTeto && entry.categoriaTeto !== entry.categoria
+                          ? ` → Teto: ${entry.categoriaTeto}`
+                          : ''}
+                        {entry.macroArea ? ` · ${entry.macroArea}` : ''}
                         {entry.recorrente ? ' · Recorrente' : ''}
                         {linkedCtr ? ` · Contrato ${linkedCtr.fornecedor}` : ''}
                       </div>
@@ -790,6 +868,7 @@ export function EntriesView({
                       </div>
                       <div className="text-[11px] text-slate-500 dark:text-slate-400 truncate">
                         {entry.empresa} · {entry.departamento}
+                        {entry.subarea ? ` / ${entry.subarea}` : ''}
                       </div>
                     </td>
                     <td className="py-2.5 px-3 text-right font-mono text-slate-700 dark:text-slate-300 tabular-nums whitespace-nowrap">
@@ -1053,6 +1132,59 @@ export function EntriesView({
                     </option>
                   ))}
                 </select>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block font-medium text-slate-700 dark:text-slate-300 mb-1">
+                    Categoria Teto (controle do teto)
+                  </label>
+                  <input
+                    type="text"
+                    value={formCatTeto}
+                    onChange={(e) => setFormCatTeto(e.target.value)}
+                    placeholder="Vazio = usa a Categoria"
+                    maxLength={200}
+                    className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg text-slate-900 dark:text-slate-100"
+                  />
+                </div>
+                <div>
+                  <label className="block font-medium text-slate-700 dark:text-slate-300 mb-1">
+                    Macro área
+                  </label>
+                  <input
+                    type="text"
+                    value={formMacroArea}
+                    onChange={(e) => setFormMacroArea(e.target.value)}
+                    placeholder="Ex: DESPESAS ADMINISTRATIVAS"
+                    maxLength={200}
+                    className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg text-slate-900 dark:text-slate-100"
+                  />
+                </div>
+                <div>
+                  <label className="block font-medium text-slate-700 dark:text-slate-300 mb-1">
+                    Linha Opex
+                  </label>
+                  <input
+                    type="text"
+                    value={formLinhaOpex}
+                    onChange={(e) => setFormLinhaOpex(e.target.value)}
+                    maxLength={200}
+                    className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg text-slate-900 dark:text-slate-100"
+                  />
+                </div>
+                <div>
+                  <label className="block font-medium text-slate-700 dark:text-slate-300 mb-1">
+                    Subárea (DHO, R&amp;S, DP...)
+                  </label>
+                  <input
+                    type="text"
+                    value={formSubarea}
+                    onChange={(e) => setFormSubarea(e.target.value)}
+                    maxLength={200}
+                    className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg text-slate-900 dark:text-slate-100"
+                  />
+                </div>
               </div>
 
               <div>

@@ -134,6 +134,11 @@ export interface Entry extends AuditMeta {
   saldo: number; // orcado - realizado
   status: EntryStatus;
   contratoId?: string;
+  /** Campos extras da planilha de lançamentos (opcionais; ausentes em registros antigos). */
+  linhaOpex?: string;
+  subarea?: string; // ex.: DHO, R&S, DP, G&G Geral
+  macroArea?: string; // ex.: DESPESAS ADMINISTRATIVAS, PESSOAL
+  categoriaTeto?: string; // categoria pela qual o teto é controlado
   obs: string;
 }
 
@@ -178,9 +183,16 @@ export function isProposal(c: { tipo?: ContractKind }): boolean {
   return c.tipo === 'proposta';
 }
 
+/** Categoria pela qual o teto é controlado: "Categoria Teto" quando existir, senão a Categoria. */
+export function tetoCategoryOf(e: { categoria: string; categoriaTeto?: string }): string {
+  return e.categoriaTeto?.trim() || e.categoria;
+}
+
 export interface AnnualPlan extends AuditMeta {
   year: number;
   tetos: Record<string, number[]>; // category name -> 12 monthly ceilings
+  /** Teto geral do ano (valor único, independente das categorias). Opcional. */
+  tetoGeral?: number;
 }
 
 export type RegistryType = 'categorias' | 'empresas' | 'departamentos' | 'fornecedores';
