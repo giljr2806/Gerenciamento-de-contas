@@ -414,6 +414,12 @@ export function useBuddhaStore() {
     [apiRequest]
   );
 
+  const deleteAllEntries = useCallback(
+    (passcode: string) =>
+      apiRequest<{ deletedCount: number }>('/api/entries/delete-all', 'POST', { passcode }),
+    [apiRequest]
+  );
+
   const generateRecurringEntries = useCallback(
     (sourceCompetencia: string, targetCompetencia: string) =>
       apiRequest<{ createdCount: number; skippedCount: number }>(
@@ -553,6 +559,7 @@ export function useBuddhaStore() {
     createEntry,
     updateEntry,
     deleteEntry,
+    deleteAllEntries,
     generateRecurringEntries,
     importEntriesBatch,
     createContract,

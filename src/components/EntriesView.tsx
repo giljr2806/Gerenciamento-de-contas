@@ -43,6 +43,8 @@ interface EntriesViewProps {
   onCreateEntry: (payload: Partial<Entry>) => Promise<unknown>;
   onUpdateEntry: (id: string, payload: Partial<Entry>) => Promise<unknown>;
   onDeleteEntry: (id: string) => Promise<unknown>;
+  canDeleteAll: boolean;
+  onDeleteAllEntries: (passcode: string) => Promise<{ deletedCount: number }>;
   onGenerateRecurring: (
     sourceCompetencia: string,
     targetCompetencia: string
@@ -66,9 +68,37 @@ export function EntriesView({
   onCreateEntry,
   onUpdateEntry,
   onDeleteEntry,
+  canDeleteAll,
+  onDeleteAllEntries,
   onGenerateRecurring,
   onImportEntries,
 }: EntriesViewProps) {
+  // Excluir tudo (exige a chave do desenvolvedor)
+  const [delAllOpen, setDelAllOpen] = useState(false);
+  const [delAllPass, setDelAllPass] = useState('');
+  const [delAllError, setDelAllError] = useState<string | null>(null);
+  const [delAllLoading, setDelAllLoading] = useState(false);
+
+  const handleDeleteAll = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setDelAllError(null);
+    if (!delAllPass.trim()) {
+      setDelAllError('Informe a chave de permissão do desenvolvedor.');
+      return;
+    }
+    setDelAllLoading(true);
+    try {
+      const res = await onDeleteAllEntries(delAllPass.trim());
+      setDelAllOpen(false);
+      setDelAllPass('');
+      setImportNotice(`${res.deletedCount} lançamento(s) excluído(s).`);
+    } catch (err) {
+      setDelAllError(err instanceof Error ? err.message : 'Erro ao excluir lançamentos.');
+    } finally {
+      setDelAllLoading(false);
+    }
+  };
+
   // Filters
   const [search, setSearch] = useState('');
   const [compFrom, setCompFrom] = useState(`${activeYear}-01`);
@@ -493,6 +523,21 @@ export function EntriesView({
               <Download className="w-3.5 h-3.5" aria-hidden="true" />
               <span>Exportar Excel</span>
             </button>
+
+            {canDeleteAll && state.entries.length > 0 && (
+              <button
+                type="button"
+                onClick={() => {
+                  setDelAllPass('');
+                  setDelAllError(null);
+                  setDelAllOpen(true);
+                }}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-red-700 dark:text-red-300 bg-red-50 dark:bg-red-950/50 border border-red-200 dark:border-red-900 rounded-lg hover:bg-red-100 dark:hover:bg-red-950 whitespace-nowrap"
+              >
+                <Trash2 className="w-3.5 h-3.5" aria-hidden="true" />
+                <span>Excluir tudo</span>
+              </button>
+            )}
 
             {canEdit && (
               <>
@@ -1444,6 +1489,65 @@ export function EntriesView({
               </div>
             </form>
           </div>
+        </div>
+      )}
+
+      {delAllOpen && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 p-4"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="del-all-title"
+        >
+          <form
+            onSubmit={handleDeleteAll}
+            className="w-full max-w-md bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl p-5 space-y-3"
+          >
+            <h3 id="del-all-title" className="font-display text-base font-semibold text-red-700 dark:text-red-400">
+              Excluir TODOS os lançamentos
+            </h3>
+            <p className="text-xs text-slate-600 dark:text-slate-300">
+              Isso apagará definitivamente os <strong>{state.entries.length}</strong> lançamentos de todos os anos.
+              Contratos, propostas, cadastros e planejamento não são afetados. Esta ação não pode ser desfeita. Se
+              precisar, exporte o Excel antes.
+            </p>
+            <div>
+              <label htmlFor="del-all-pass" className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1">
+                Chave de permissão do desenvolvedor
+              </label>
+              <input
+                id="del-all-pass"
+                type="password"
+                autoComplete="off"
+                autoFocus
+                value={delAllPass}
+                onChange={(e) => setDelAllPass(e.target.value)}
+                className="w-full px-3 py-2 text-sm bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg text-slate-900 dark:text-slate-100"
+              />
+            </div>
+            {delAllError && (
+              <div className="p-2 text-xs text-red-800 dark:text-red-300 bg-red-50 dark:bg-red-950/60 border border-red-200 dark:border-red-900 rounded-lg">
+                {delAllError}
+              </div>
+            )}
+            <div className="flex justify-end gap-2 pt-1">
+              <button
+                type="button"
+                onClick={() => setDelAllOpen(false)}
+                disabled={delAllLoading}
+                className="px-4 py-2 text-xs font-medium text-slate-700 dark:text-slate-200 bg-slate-100 dark:bg-slate-800 rounded-lg hover:bg-slate-200 dark:hover:bg-slate-700"
+              >
+                Cancelar
+              </button>
+              <button
+                type="submit"
+                disabled={delAllLoading}
+                className="px-4 py-2 text-xs font-semibold text-white bg-red-700 rounded-lg hover:bg-red-800 disabled:opacity-60"
+              >
+                {delAllLoading ? 'Excluindo...' : 'Excluir tudo'}
+              </button>
+            </div>
+          </form>
         </div>
       )}
 
