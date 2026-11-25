@@ -107,6 +107,102 @@ export function daysUntil(isoDate: string, refDate = new Date()): number {
   return Math.round((target.getTime() - base.getTime()) / (1000 * 60 * 60 * 24));
 }
 
+export type TermState = 'none' | 'future' | 'active' | 'ended';
+
+export interface TermInfo {
+  state: TermState;
+  totalMonths: number;
+  elapsedMonths: number;
+  remainingMonths: number;
+  daysLeft: number;
+  /** Progresso do prazo em % (0–100), calculado em dias. */
+  pct: number;
+  /** Para 'future' (até iniciar) e 'ended' (desde que acabou), em meses inteiros e dias. */
+  offsetMonths: number;
+  offsetDays: number;
+}
+
+function parseLocalISO(iso: string): Date | null {
+  if (!iso) return null;
+  const d = new Date(`${iso}T00:00:00`);
+  return Number.isNaN(d.getTime()) ? null : d;
+}
+
+function addMonthsClamped(d: Date, months: number): Date {
+  const target = new Date(d.getFullYear(), d.getMonth() + months, 1);
+  const lastDay = new Date(target.getFullYear(), target.getMonth() + 1, 0).getDate();
+  target.setDate(Math.min(d.getDate(), lastDay));
+  return target;
+}
+
+/** Meses inteiros completos entre a e b (b >= a); 0 se b < a. */
+function wholeMonthsBetween(a: Date, b: Date): number {
+  if (b < a) return 0;
+  let m = (b.getFullYear() - a.getFullYear()) * 12 + (b.getMonth() - a.getMonth());
+  if (addMonthsClamped(a, m) > b) m -= 1;
+  return Math.max(0, m);
+}
+
+const DAY_MS = 1000 * 60 * 60 * 24;
+
+/** Contador de prazo: meses percorridos e faltantes entre início e fim (fim inclusive). */
+export function getTermInfo(inicio: string, fim: string, refDate = new Date()): TermInfo {
+  const start = parseLocalISO(inicio);
+  const end = parseLocalISO(fim);
+  const empty: TermInfo = {
+    state: 'none',
+    totalMonths: 0,
+    elapsedMonths: 0,
+    remainingMonths: 0,
+    daysLeft: 0,
+    pct: 0,
+    offsetMonths: 0,
+    offsetDays: 0,
+  };
+  if (!start || !end || end < start) return empty;
+
+  const today = new Date(refDate.getFullYear(), refDate.getMonth(), refDate.getDate());
+  const endExcl = new Date(end.getFullYear(), end.getMonth(), end.getDate() + 1);
+
+  let totalMonths = wholeMonthsBetween(start, endExcl);
+  if (addMonthsClamped(start, totalMonths) < endExcl) totalMonths += 1; // mês parcial conta como mês
+  totalMonths = Math.max(1, totalMonths);
+
+  const daysLeft = Math.round((endExcl.getTime() - today.getTime()) / DAY_MS);
+  const base = { ...empty, totalMonths, daysLeft };
+
+  if (today < start) {
+    return {
+      ...base,
+      state: 'future',
+      remainingMonths: totalMonths,
+      offsetMonths: wholeMonthsBetween(today, start),
+      offsetDays: Math.round((start.getTime() - today.getTime()) / DAY_MS),
+    };
+  }
+  if (today >= endExcl) {
+    return {
+      ...base,
+      state: 'ended',
+      elapsedMonths: totalMonths,
+      pct: 100,
+      daysLeft: 0,
+      offsetMonths: wholeMonthsBetween(endExcl, today),
+      offsetDays: Math.round((today.getTime() - endExcl.getTime()) / DAY_MS),
+    };
+  }
+
+  const elapsedMonths = Math.min(totalMonths, wholeMonthsBetween(start, today));
+  const pct = ((today.getTime() - start.getTime()) / (endExcl.getTime() - start.getTime())) * 100;
+  return {
+    ...base,
+    state: 'active',
+    elapsedMonths,
+    remainingMonths: Math.max(0, totalMonths - elapsedMonths),
+    pct: Math.min(100, Math.max(0, pct)),
+  };
+}
+
 export function subtractDaysISO(isoDate: string, days: number): string {
   const target = new Date(`${isoDate}T00:00:00`);
   if (Number.isNaN(target.getTime())) return '';

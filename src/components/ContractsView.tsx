@@ -38,6 +38,7 @@ import {
 } from '../utils/format';
 import { ConfirmDialog } from './ConfirmDialog';
 import { ContractStatusChip, EntryStatusChip, HealthChip } from './StatusChip';
+import { TermCounter } from './TermCounter';
 
 interface ContractsViewProps {
   state: DatabaseState;
@@ -623,20 +624,8 @@ export function ContractsView({
                           <div className="font-mono text-slate-800 dark:text-slate-200 tabular-nums">
                             {formatDateBR(c.inicio)} → {formatDateBR(c.fim)}
                           </div>
-                          {!prop && (
-                            <div
-                              className={`text-[11px] tabular-nums ${
-                                daysLeft < 0
-                                  ? 'text-red-700 dark:text-red-400 font-semibold'
-                                  : daysLeft <= 60
-                                  ? 'text-amber-700 dark:text-amber-400'
-                                  : 'text-slate-500 dark:text-slate-400'
-                              }`}
-                            >
-                              {daysLeft < 0
-                                ? `Vencido há ${Math.abs(daysLeft)}d`
-                                : `${daysLeft} dia(s) restante(s)`}
-                            </div>
+                          {c.inicio && c.fim && c.status !== 'Encerrado' && c.status !== 'Suspenso' && (
+                            <TermCounter inicio={c.inicio} fim={c.fim} />
                           )}
                         </>
                       )}
@@ -819,6 +808,17 @@ export function ContractsView({
                       {formMsg}
                     </div>
                   )}
+
+                  {!creatingNew &&
+                    selectedContract?.inicio &&
+                    selectedContract?.fim &&
+                    selectedContract.status !== 'Encerrado' &&
+                    selectedContract.status !== 'Suspenso' && (
+                      <div className="p-3 border border-slate-200 dark:border-slate-700 rounded-lg bg-slate-50 dark:bg-slate-800/50">
+                        <div className="font-medium text-slate-700 dark:text-slate-300 mb-1.5">Prazo</div>
+                        <TermCounter inicio={selectedContract.inicio} fim={selectedContract.fim} variant="full" />
+                      </div>
+                    )}
 
                   <fieldset disabled={!canEdit} className="space-y-4">
                     <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
