@@ -274,6 +274,8 @@ export default function App() {
                 onCreateEntry={store.createEntry}
                 onUpdateEntry={store.updateEntry}
                 onDeleteEntry={store.deleteEntry}
+                canDeleteAll={store.isAdmin && store.hasPermission('lancamentos')}
+                onDeleteAllEntries={store.deleteAllEntries}
                 onGenerateRecurring={store.generateRecurringEntries}
                 onImportEntries={store.importEntriesBatch}
               />

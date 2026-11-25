@@ -1158,6 +1158,44 @@ export function createApp() {
     res.json({ entry: updated, state: db });
   });
 
+  // Delete ALL entries (admin/developer + chave do desenvolvedor conferida a cada chamada)
+  app.post('/api/entries/delete-all', requireRole(['admin'], 'lancamentos'), async (req: Request, res: Response) => {
+    const ctx = getAuthContext(req);
+    if (tooManyUnlockAttempts(`delall:${ctx.userId}`)) {
+      res.status(429).json({ error: 'Muitas tentativas. Aguarde alguns minutos e tente novamente.' });
+      return;
+    }
+    const cleanPass = String((req.body as { passcode?: unknown })?.passcode ?? '').trim();
+    if (!cleanPass) {
+      res.status(400).json({ error: 'Informe a chave de permissão do desenvolvedor.' });
+      return;
+    }
+    const status = await getDeveloperAuthStatus();
+    if (!status.configured) {
+      res.status(400).json({ error: 'Nenhuma chave de desenvolvedor foi configurada ainda.' });
+      return;
+    }
+    const envCode = process.env.DEVELOPER_ACCESS_CODE?.trim();
+    let valid = false;
+    if (envCode) {
+      valid = verifyEnvPasscode(cleanPass, envCode);
+    } else {
+      const store = await loadAuthStore();
+      if (store.developerKeyHash) valid = verifyScryptPasscode(cleanPass, store.developerKeyHash);
+    }
+    if (!valid) {
+      res.status(401).json({ error: 'Chave de permissão do desenvolvedor inválida.' });
+      return;
+    }
+
+    const deletedCount = db.entries.length;
+    db.entries = [];
+    saveDatabase();
+    broadcastSync('entries:deleted-all');
+    console.warn(`[audit] ${ctx.email || ctx.userId} excluiu todos os lançamentos (${deletedCount}).`);
+    res.json({ deletedCount, state: db });
+  });
+
   // Delete Entry
   app.delete('/api/entries/:id', requireRole(['admin', 'editor'], 'lancamentos'), (req: Request, res: Response) => {
     const { id } = req.params;
